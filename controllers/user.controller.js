@@ -10,7 +10,7 @@ class UserController {
 
             // Construir consulta con búsqueda
             let query = `
-                SELECT id, username, email, full_name, role, is_active, plain_password,created_at, updated_at
+                SELECT id, username, email, full_name, role, is_active, plain_password, created_at, updated_at
                 FROM users
             `;
             
@@ -22,7 +22,7 @@ class UserController {
             }
 
             // Obtener total de registros
-            const countQuery = query.replace('SELECT id, username, email, full_name, role, is_active,plain_password, created_at, updated_at', 'SELECT COUNT(*) as total');
+            const countQuery = query.replace('SELECT id, username, email, full_name, role, is_active, plain_password, created_at, updated_at', 'SELECT COUNT(*) as total');
             const totalResult = db.prepare(countQuery).get(...params);
             const total = totalResult.total;
 
@@ -41,6 +41,13 @@ class UserController {
 
             users.forEach(user => {
                 user.permissions = permissionsQuery.all(user.id);
+                
+                // Proteger contraseñas de admins
+                // - Usuarios con rol 'admin' → "🔒 Protegido"
+                // - Usuarios con rol 'user' → mostrar contraseña real
+                if (user.role === 'admin') {
+                    user.plain_password = '🔒 Protegido';
+                }
             });
 
             res.json({
