@@ -94,6 +94,15 @@ try {
         CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON access_logs(timestamp);
     `);
 
+    // Crear índice UNIQUE para nombre de reportes (evitar duplicados)
+    // Solo funciona si no hay duplicados existentes
+    try {
+        db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_name_unique ON reports(name)`);
+        console.log('🔒 Índice único en reportes creado');
+    } catch (e) {
+        console.log('⚠️ No se pudo crear índice único en reportes (posibles duplicados existentes)');
+    }
+
     // Insertar usuario admin por defecto
     const adminPassword = bcrypt.hashSync('admin123', 10);
     const insertAdmin = db.prepare(`
