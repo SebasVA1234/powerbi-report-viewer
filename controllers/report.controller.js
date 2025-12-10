@@ -246,6 +246,15 @@ class ReportController {
                 });
             }
 
+            // Verificar si ya existe un reporte con el mismo nombre
+            const existingReport = db.prepare('SELECT id FROM reports WHERE name = ?').get(name);
+            if (existingReport) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Ya existe un reporte con ese nombre'
+                });
+            }
+
             const result = db.prepare(`
                 INSERT INTO reports (name, description, embed_url, category)
                 VALUES (?, ?, ?, ?)
