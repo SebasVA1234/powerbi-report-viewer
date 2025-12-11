@@ -327,7 +327,7 @@ body {
 }
 
 .sidebar-header {
-    padding: 20px;
+    padding: 24px 16px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -335,9 +335,12 @@ body {
 }
 
 .sidebar-logo {
-    height: 80px;
-    width: auto;
+    width: 100%;
+    max-width: 180px;
+    height: auto;
     object-fit: contain;
+    display: block;
+    margin: 0 auto;
 }
 
 .sidebar-nav {
@@ -380,37 +383,6 @@ body {
 .nav-link.active {
     background: var(--secondary-dark);
     color: white;
-}
-
-.sidebar-footer {
-    padding: 16px 12px;
-    border-top: 1px solid rgba(255,255,255,0.1);
-}
-
-.btn-logout-sidebar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    color: var(--gray-400);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition);
-    font-weight: 500;
-    font-size: 14px;
-    width: 100%;
-}
-
-.btn-logout-sidebar svg {
-    width: 20px;
-    height: 20px;
-}
-
-.btn-logout-sidebar:hover {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--danger-color);
 }
 
 /* =============================================
@@ -1623,6 +1595,7 @@ body {
 
 .sidebar.collapsed .sidebar-logo {
     width: 45px;
+    max-width: 45px;
     height: auto;
 }
 
@@ -1630,8 +1603,7 @@ body {
     padding: 20px 15px;
 }
 
-.sidebar.collapsed .nav-link span,
-.sidebar.collapsed .btn-logout-sidebar span {
+.sidebar.collapsed .nav-link span {
     display: none;
 }
 
@@ -1640,13 +1612,7 @@ body {
     padding: 14px 10px;
 }
 
-.sidebar.collapsed .btn-logout-sidebar {
-    justify-content: center;
-    padding: 14px 10px;
-}
-
-.sidebar.collapsed .nav-link svg,
-.sidebar.collapsed .btn-logout-sidebar svg {
+.sidebar.collapsed .nav-link svg {
     margin-right: 0;
 }
 
@@ -1659,4 +1625,123 @@ body {
 .menu-toggle {
     display: flex !important;
     cursor: pointer;
+}
+
+/* =============================================
+   MOBILE RESPONSIVE FIX
+   ============================================= */
+
+/* Menú móvil overlay */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 99;
+}
+
+.sidebar-overlay.active {
+    display: block;
+}
+
+/* Mobile menu toggle */
+@media (max-width: 1024px) {
+    .sidebar {
+        transform: translateX(-100%);
+        width: var(--sidebar-width);
+    }
+    
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    
+    .main-wrapper {
+        margin-left: 0 !important;
+    }
+    
+    .menu-toggle {
+        display: flex !important;
+    }
+}
+
+/* Login logo centrado */
+.login-header {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.login-header .logo {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.login-header .logo img {
+    width: 180px;
+    height: auto;
+    margin: 0 auto;
+}
+
+/* Sidebar logo más grande */
+.sidebar-logo {
+    height: 100px;
+    width: auto;
+    object-fit: contain;
+}
+
+/* User menu clickeable para cerrar sesión */
+.user-menu {
+    cursor: pointer;
+    position: relative;
+}
+
+.user-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 180px;
+    z-index: 1000;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.user-dropdown.active {
+    display: block;
+}
+
+.user-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: var(--transition);
+    border: none;
+    background: none;
+    width: 100%;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.user-dropdown-item:hover {
+    background: var(--gray-100);
+}
+
+.user-dropdown-item.danger {
+    color: var(--danger-color);
+}
+
+.user-dropdown-item svg {
+    width: 18px;
+    height: 18px;
 }

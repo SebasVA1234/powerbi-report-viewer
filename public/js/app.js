@@ -148,31 +148,67 @@ if ('serviceWorker' in navigator) {
 }
 
 /* =============================================
-   SIDEBAR TOGGLE - Agregar al final de cualquier archivo JS
-   o crear como archivo separado y agregarlo al HTML
+   SIDEBAR & USER MENU - Mobile responsive
    ============================================= */
 
-// Función para colapsar/expandir el sidebar
+// Toggle sidebar (móvil)
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
     const mainWrapper = document.querySelector('.main-wrapper');
     
-    if (sidebar) {
+    if (window.innerWidth <= 1024) {
+        // Móvil: abrir/cerrar
+        sidebar.classList.toggle('open');
+        if (overlay) overlay.classList.toggle('active');
+    } else {
+        // Desktop: colapsar/expandir
         sidebar.classList.toggle('collapsed');
-    }
-    if (mainWrapper) {
-        mainWrapper.classList.toggle('expanded');
+        if (mainWrapper) mainWrapper.classList.toggle('expanded');
     }
 }
 
-// Conectar el botón del menú cuando cargue la página
+// Cerrar sidebar (móvil)
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('active');
+}
+
+// Toggle user dropdown
+function toggleUserDropdown() {
+    event.stopPropagation();
+    const dropdown = document.getElementById('user-dropdown');
+    dropdown.classList.toggle('active');
+}
+
+// Cerrar user dropdown
+function closeUserDropdown() {
+    const dropdown = document.getElementById('user-dropdown');
+    dropdown.classList.remove('active');
+}
+
+// Cerrar dropdown al hacer clic fuera
+document.addEventListener('click', function(e) {
+    const dropdown = document.getElementById('user-dropdown');
+    const userMenu = document.querySelector('.user-menu');
+    
+    if (dropdown && userMenu && !userMenu.contains(e.target)) {
+        dropdown.classList.remove('active');
+    }
+});
+
+// Conectar el botón del menú
 document.addEventListener('DOMContentLoaded', function() {
     const menuToggle = document.getElementById('menu-toggle');
-    
     if (menuToggle) {
         menuToggle.addEventListener('click', toggleSidebar);
     }
 });
 
-// Exportar la función globalmente
+// Exportar funciones globalmente
 window.toggleSidebar = toggleSidebar;
+window.closeSidebar = closeSidebar;
+window.toggleUserDropdown = toggleUserDropdown;
+window.closeUserDropdown = closeUserDropdown;
