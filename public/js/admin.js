@@ -358,38 +358,41 @@ async function showReportAccessModal(reportId, reportName) {
     }
 }
 
-// SAVE PERMISSIONS (NUEVO)
+// SAVE PERMISSIONS — usa el endpoint /sync que hace todo en una transacción atómica.
+// Ya no hay errores "Permiso no encontrado" al desmarcar usuarios que no tenían acceso.
 async function savePermissions() {
-    const reportId = document.getElementById('access-report-id').value;
+    const reportId = parseInt(document.getElementById('access-report-id').value, 10);
     const checkboxes = document.querySelectorAll('.user-access-checkbox');
-    const promises = [];
     const saveBtn = document.querySelector('#access-modal .btn-primary');
-    
-    saveBtn.disabled = true;
-    saveBtn.innerText = 'Guardando...';
 
+    // Recolectar IDs de usuarios marcados
+    const userIds = [];
     checkboxes.forEach(cb => {
-        const userId = cb.value;
-        const shouldHaveAccess = cb.checked;
-        
-        // Asignamos o Removemos según el estado del checkbox
-        if (shouldHaveAccess) {
-            promises.push(API.assignPermission(userId, reportId, { can_view: true }));
-        } else {
-            promises.push(API.removePermission(userId, reportId));
+        if (cb.checked) {
+            const id = parseInt(cb.value, 10);
+            if (Number.isInteger(id) && id > 0) userIds.push(id);
         }
     });
 
+    saveBtn.disabled = true;
+    const originalText = saveBtn.innerText;
+    saveBtn.innerText = 'Guardando...';
+
     try {
-        await Promise.all(promises);
-        Notification.success('Accesos actualizados correctamente');
-        closeModal('access-modal');
-        loadAllReports(); // Actualizar contador de usuarios
+        const resp = await API.syncReportPermissions(reportId, userIds);
+        if (resp && resp.success) {
+            Notification.success(`Accesos actualizados (${userIds.length} usuario${userIds.length !== 1 ? 's' : ''})`);
+            closeModal('access-modal');
+            if (typeof loadAllReports === 'function') loadAllReports();
+        } else {
+            Notification.error((resp && resp.message) || 'No se pudieron guardar los accesos');
+        }
     } catch (error) {
-        Notification.error('Error al guardar algunos permisos');
+        console.error('savePermissions:', error);
+        Notification.error(error.message || 'Error al guardar accesos');
     } finally {
         saveBtn.disabled = false;
-        saveBtn.innerText = 'Guardar Accesos';
+        saveBtn.innerText = originalText || 'Guardar Accesos';
     }
 }
 

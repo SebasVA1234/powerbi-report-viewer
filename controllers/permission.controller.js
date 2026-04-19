@@ -70,13 +70,13 @@ class PermissionController {
         }
     }
 
-    // Quitar permiso de un usuario para un reporte
+    // Quitar permiso de un usuario para un reporte (idempotente)
     static removePermission(req, res) {
         try {
             const { userId, reportId } = req.params;
             const revokedBy = req.user.id;
 
-            // Verificar que el permiso existe
+            // Buscar el permiso (puede no existir — eso no es un error)
             const permission = db.prepare(`
                 SELECT u.username, r.name as report_name
                 FROM user_report_permissions p
@@ -86,15 +86,17 @@ class PermissionController {
             `).get(userId, reportId);
 
             if (!permission) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Permiso no encontrado'
+                // Idempotente: si no hay permiso, ya está en el estado deseado
+                return res.json({
+                    success: true,
+                    message: 'El usuario ya no tenía permiso',
+                    alreadyAbsent: true
                 });
             }
 
             // Eliminar permiso
             db.prepare(`
-                DELETE FROM user_report_permissions 
+                DELETE FROM user_report_permissions
                 WHERE user_id = ? AND report_id = ?
             `).run(userId, reportId);
 
@@ -113,6 +115,90 @@ class PermissionController {
             res.status(500).json({
                 success: false,
                 message: 'Error al quitar permiso'
+            });
+        }
+    }
+
+    // Sincronizar lista completa de usuarios con acceso a un reporte (atómico)
+    // Body: { userIds: number[] }  -> usuarios que DEBEN tener can_view=1.
+    // Todos los demás pierden el permiso para ese reporte.
+    static syncReportPermissions(req, res) {
+        try {
+            const { reportId } = req.params;
+            const { userIds = [] } = req.body;
+            const grantedBy = req.user.id;
+
+            const report = db.prepare('SELECT name FROM reports WHERE id = ?').get(reportId);
+            if (!report) {
+                return res.status(404).json({ success: false, message: 'Reporte no encontrado' });
+            }
+
+            // Normalizar a enteros válidos
+            const targetIds = [...new Set(
+                (Array.isArray(userIds) ? userIds : [])
+                    .map(n => parseInt(n, 10))
+                    .filter(n => Number.isInteger(n) && n > 0)
+            )];
+
+            // Validar que todos los usuarios existen
+            if (targetIds.length > 0) {
+                const placeholders = targetIds.map(() => '?').join(',');
+                const found = db.prepare(
+                    `SELECT id FROM users WHERE id IN (${placeholders})`
+                ).all(...targetIds);
+                if (found.length !== targetIds.length) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Uno o más usuarios no existen'
+                    });
+                }
+            }
+
+            const insert = db.prepare(`
+                INSERT INTO user_report_permissions (user_id, report_id, can_view, can_export, granted_by)
+                VALUES (?, ?, 1, 0, ?)
+                ON CONFLICT(user_id, report_id) DO UPDATE SET
+                    can_view = 1,
+                    granted_by = excluded.granted_by,
+                    granted_at = CURRENT_TIMESTAMP
+            `);
+            const deleteOthers = targetIds.length > 0
+                ? db.prepare(
+                    `DELETE FROM user_report_permissions
+                     WHERE report_id = ? AND user_id NOT IN (${targetIds.map(() => '?').join(',')})`
+                  )
+                : db.prepare('DELETE FROM user_report_permissions WHERE report_id = ?');
+
+            const transaction = db.transaction(() => {
+                // Borrar todos los que NO están en la lista
+                if (targetIds.length > 0) {
+                    deleteOthers.run(reportId, ...targetIds);
+                } else {
+                    deleteOthers.run(reportId);
+                }
+                // Insertar/actualizar los que SI están
+                for (const userId of targetIds) {
+                    insert.run(userId, reportId, grantedBy);
+                }
+            });
+
+            transaction();
+
+            db.prepare(`
+                INSERT INTO access_logs (user_id, action, ip_address)
+                VALUES (?, ?, ?)
+            `).run(grantedBy, `sync_permissions:${report.name}:${targetIds.length}users`, req.ip || 'unknown');
+
+            res.json({
+                success: true,
+                message: `Accesos sincronizados: ${targetIds.length} usuarios con permiso`,
+                data: { userIds: targetIds }
+            });
+        } catch (error) {
+            console.error('Error al sincronizar permisos:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al sincronizar permisos'
             });
         }
     }
@@ -301,9 +387,11 @@ class PermissionController {
             `).get(userId, documentId);
 
             if (!permission) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Permiso no encontrado'
+                // Idempotente: si no hay permiso, ya está en el estado deseado
+                return res.json({
+                    success: true,
+                    message: 'El usuario ya no tenía permiso',
+                    alreadyAbsent: true
                 });
             }
 
@@ -421,6 +509,84 @@ class PermissionController {
             res.status(500).json({
                 success: false,
                 message: 'Error al obtener matriz de permisos de documentos'
+            });
+        }
+    }
+
+    // Sincronizar lista completa de usuarios con acceso a un documento (atómico)
+    static syncDocumentPermissions(req, res) {
+        try {
+            const { documentId } = req.params;
+            const { userIds = [] } = req.body;
+            const grantedBy = req.user.id;
+
+            const doc = db.prepare('SELECT name FROM documents WHERE id = ?').get(documentId);
+            if (!doc) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+
+            const targetIds = [...new Set(
+                (Array.isArray(userIds) ? userIds : [])
+                    .map(n => parseInt(n, 10))
+                    .filter(n => Number.isInteger(n) && n > 0)
+            )];
+
+            if (targetIds.length > 0) {
+                const placeholders = targetIds.map(() => '?').join(',');
+                const found = db.prepare(
+                    `SELECT id FROM users WHERE id IN (${placeholders})`
+                ).all(...targetIds);
+                if (found.length !== targetIds.length) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Uno o más usuarios no existen'
+                    });
+                }
+            }
+
+            const insert = db.prepare(`
+                INSERT INTO user_document_permissions (user_id, document_id, can_view, granted_by)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(user_id, document_id) DO UPDATE SET
+                    can_view = 1,
+                    granted_by = excluded.granted_by,
+                    granted_at = CURRENT_TIMESTAMP
+            `);
+            const deleteOthers = targetIds.length > 0
+                ? db.prepare(
+                    `DELETE FROM user_document_permissions
+                     WHERE document_id = ? AND user_id NOT IN (${targetIds.map(() => '?').join(',')})`
+                  )
+                : db.prepare('DELETE FROM user_document_permissions WHERE document_id = ?');
+
+            const transaction = db.transaction(() => {
+                if (targetIds.length > 0) {
+                    deleteOthers.run(documentId, ...targetIds);
+                } else {
+                    deleteOthers.run(documentId);
+                }
+                for (const userId of targetIds) {
+                    insert.run(userId, documentId, grantedBy);
+                }
+            });
+
+            transaction();
+
+            db.prepare(`
+                INSERT INTO access_logs (user_id, action, ip_address)
+                VALUES (?, ?, ?)
+            `).run(grantedBy, `sync_doc_permissions:${doc.name}:${targetIds.length}users`, req.ip || 'unknown');
+
+            res.json({
+                success: true,
+                message: `Accesos sincronizados: ${targetIds.length} usuarios con permiso`,
+                data: { userIds: targetIds }
+            });
+        } catch (error) {
+            console.error('Error al sincronizar permisos de documento:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al sincronizar permisos de documento'
             });
         }
     }

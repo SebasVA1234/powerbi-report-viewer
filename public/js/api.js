@@ -163,6 +163,15 @@ const API = {
         });
     },
 
+    // Sincroniza la lista completa de usuarios con acceso a un reporte
+    // en UNA sola llamada atómica. userIds = array de IDs que DEBEN tener permiso.
+    async syncReportPermissions(reportId, userIds) {
+        return this.request(`${API_ENDPOINTS.PERMISSIONS}/reports/${reportId}/sync`, {
+            method: 'POST',
+            body: JSON.stringify({ userIds })
+        });
+    },
+
     async clonePermissions(sourceUserId, targetUserId) {
         return this.request(API_ENDPOINTS.CLONE_PERMISSIONS, {
             method: 'POST',
@@ -254,6 +263,14 @@ const API = {
         return this.request(API_ENDPOINTS.DOCUMENTS_BULK_ASSIGN, {
             method: 'POST',
             body: JSON.stringify(data)
+        });
+    },
+
+    // Sincroniza lista completa de usuarios con acceso a un documento (atómico)
+    async syncDocumentPermissions(documentId, userIds) {
+        return this.request(`${API_ENDPOINTS.PERMISSIONS}/documents/${documentId}/sync`, {
+            method: 'POST',
+            body: JSON.stringify({ userIds })
         });
     }
 };

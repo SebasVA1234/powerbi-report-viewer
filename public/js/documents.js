@@ -517,31 +517,41 @@ async function showDocumentAccessModal(documentId, documentName) {
 async function saveDocumentPermissions() {
     const documentId = parseInt(document.getElementById('doc-access-document-id').value, 10);
     const checks = document.querySelectorAll('.doc-user-check');
-    const grant = [];
-    const revoke = [];
+    const saveBtn = document.querySelector('#doc-access-modal .btn-primary');
+
+    const userIds = [];
     checks.forEach(ch => {
-        const userId = parseInt(ch.dataset.userId, 10);
-        if (ch.checked) grant.push(userId);
-        else revoke.push(userId);
+        if (ch.checked) {
+            const id = parseInt(ch.dataset.userId, 10);
+            if (Number.isInteger(id) && id > 0) userIds.push(id);
+        }
     });
 
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn._origText = saveBtn.innerText;
+        saveBtn.innerText = 'Guardando...';
+    }
+
     try {
-        if (grant.length > 0) {
-            await API.bulkAssignDocumentPermissions({
-                userIds: grant,
-                documentIds: [documentId],
-                can_view: true
-            });
+        // Sync atómico: define exactamente quién tiene acceso en una sola llamada.
+        const resp = await API.syncDocumentPermissions(documentId, userIds);
+        if (resp && resp.success) {
+            Notification.success(`Accesos actualizados (${userIds.length} usuario${userIds.length !== 1 ? 's' : ''})`);
+            closeModal('doc-access-modal');
+            if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
+            if (typeof loadDocumentsPermissionsMatrix === 'function') loadDocumentsPermissionsMatrix();
+        } else {
+            Notification.error((resp && resp.message) || 'No se pudieron guardar los accesos');
         }
-        // Revocar uno a uno (no hay bulk-revoke)
-        for (const userId of revoke) {
-            try { await API.removeDocumentPermission(userId, documentId); } catch (_) {}
-        }
-        Notification.success('Accesos actualizados');
-        closeModal('doc-access-modal');
-        loadDocumentsPermissionsMatrix();
     } catch (err) {
+        console.error('saveDocumentPermissions:', err);
         Notification.error(err.message || 'Error al guardar accesos');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerText = saveBtn._origText || 'Guardar Accesos';
+        }
     }
 }
 

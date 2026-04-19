@@ -8,6 +8,7 @@ router.get('/matrix', authMiddleware, adminMiddleware, PermissionController.getP
 router.post('/users/:userId/reports/:reportId', authMiddleware, adminMiddleware, PermissionController.assignPermission);
 router.delete('/users/:userId/reports/:reportId', authMiddleware, adminMiddleware, PermissionController.removePermission);
 router.post('/bulk-assign', authMiddleware, adminMiddleware, PermissionController.bulkAssignPermissions);
+router.post('/reports/:reportId/sync', authMiddleware, adminMiddleware, PermissionController.syncReportPermissions);
 router.post('/clone', authMiddleware, adminMiddleware, PermissionController.clonePermissions);
 
 // ==== Permisos de DOCUMENTOS ====
@@ -15,5 +16,6 @@ router.get('/documents/matrix', authMiddleware, adminMiddleware, PermissionContr
 router.post('/users/:userId/documents/:documentId', authMiddleware, adminMiddleware, PermissionController.assignDocumentPermission);
 router.delete('/users/:userId/documents/:documentId', authMiddleware, adminMiddleware, PermissionController.removeDocumentPermission);
 router.post('/documents/bulk-assign', authMiddleware, adminMiddleware, PermissionController.bulkAssignDocumentPermissions);
+router.post('/documents/:documentId/sync', authMiddleware, adminMiddleware, PermissionController.syncDocumentPermissions);
 
 module.exports = router;
