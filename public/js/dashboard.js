@@ -244,6 +244,9 @@ function showSection(sectionName) {
         }
         switch (sectionName) {
             case 'reports': loadMyReports(); break;
+            case 'documents':
+                if (typeof loadMyDocuments === 'function') loadMyDocuments();
+                break;
             case 'profile': loadProfileData(); break;
             case 'admin': if (Auth.isAdmin()) initializeAdminSection(); break;
         }

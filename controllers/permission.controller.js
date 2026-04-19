@@ -229,6 +229,202 @@ class PermissionController {
         }
     }
 
+    // =============================================
+    // PERMISOS DE DOCUMENTOS (PDFs)
+    // =============================================
+
+    // Asignar/actualizar permiso de documento
+    static assignDocumentPermission(req, res) {
+        try {
+            const { userId, documentId } = req.params;
+            const { can_view = true } = req.body;
+            const grantedBy = req.user.id;
+
+            const user = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
+            const doc = db.prepare('SELECT name FROM documents WHERE id = ?').get(documentId);
+
+            if (!user || !doc) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Usuario o documento no encontrado'
+                });
+            }
+
+            const existing = db.prepare(`
+                SELECT id FROM user_document_permissions
+                WHERE user_id = ? AND document_id = ?
+            `).get(userId, documentId);
+
+            if (existing) {
+                db.prepare(`
+                    UPDATE user_document_permissions
+                    SET can_view = ?, granted_by = ?, granted_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND document_id = ?
+                `).run(can_view ? 1 : 0, grantedBy, userId, documentId);
+            } else {
+                db.prepare(`
+                    INSERT INTO user_document_permissions (user_id, document_id, can_view, granted_by)
+                    VALUES (?, ?, ?, ?)
+                `).run(userId, documentId, can_view ? 1 : 0, grantedBy);
+            }
+
+            db.prepare(`
+                INSERT INTO access_logs (user_id, action, ip_address)
+                VALUES (?, ?, ?)
+            `).run(grantedBy, `assign_doc_permission:${user.username}:${doc.name}`, req.ip || 'unknown');
+
+            res.json({
+                success: true,
+                message: 'Permiso de documento asignado exitosamente'
+            });
+        } catch (error) {
+            console.error('Error al asignar permiso de documento:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al asignar permiso de documento'
+            });
+        }
+    }
+
+    // Revocar permiso de documento
+    static removeDocumentPermission(req, res) {
+        try {
+            const { userId, documentId } = req.params;
+            const revokedBy = req.user.id;
+
+            const permission = db.prepare(`
+                SELECT u.username, d.name as document_name
+                FROM user_document_permissions p
+                JOIN users u ON p.user_id = u.id
+                JOIN documents d ON p.document_id = d.id
+                WHERE p.user_id = ? AND p.document_id = ?
+            `).get(userId, documentId);
+
+            if (!permission) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Permiso no encontrado'
+                });
+            }
+
+            db.prepare(`
+                DELETE FROM user_document_permissions
+                WHERE user_id = ? AND document_id = ?
+            `).run(userId, documentId);
+
+            db.prepare(`
+                INSERT INTO access_logs (user_id, action, ip_address)
+                VALUES (?, ?, ?)
+            `).run(revokedBy, `revoke_doc_permission:${permission.username}:${permission.document_name}`, req.ip || 'unknown');
+
+            res.json({
+                success: true,
+                message: 'Permiso de documento revocado exitosamente'
+            });
+        } catch (error) {
+            console.error('Error al quitar permiso de documento:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al quitar permiso de documento'
+            });
+        }
+    }
+
+    // Asignación masiva de permisos de documentos
+    static bulkAssignDocumentPermissions(req, res) {
+        try {
+            const { userIds = [], documentIds = [], can_view = true } = req.body;
+            const grantedBy = req.user.id;
+
+            if (!userIds.length || !documentIds.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Se requieren IDs de usuarios y documentos'
+                });
+            }
+
+            const stmt = db.prepare(`
+                INSERT OR REPLACE INTO user_document_permissions (user_id, document_id, can_view, granted_by)
+                VALUES (?, ?, ?, ?)
+            `);
+
+            const transaction = db.transaction(() => {
+                for (const userId of userIds) {
+                    for (const documentId of documentIds) {
+                        stmt.run(userId, documentId, can_view ? 1 : 0, grantedBy);
+                    }
+                }
+            });
+
+            transaction();
+
+            db.prepare(`
+                INSERT INTO access_logs (user_id, action, ip_address)
+                VALUES (?, ?, ?)
+            `).run(grantedBy, `bulk_doc_assign:${userIds.length}users:${documentIds.length}docs`, req.ip || 'unknown');
+
+            res.json({
+                success: true,
+                message: `Permisos asignados a ${userIds.length} usuarios para ${documentIds.length} documentos`
+            });
+        } catch (error) {
+            console.error('Error en asignación masiva de documentos:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al asignar permisos de documentos en masa'
+            });
+        }
+    }
+
+    // Matriz de permisos de documentos
+    static getDocumentsPermissionsMatrix(req, res) {
+        try {
+            const users = db.prepare(`
+                SELECT id, username, full_name
+                FROM users
+                WHERE is_active = 1
+                ORDER BY username
+            `).all();
+
+            const documents = db.prepare(`
+                SELECT id, name, category
+                FROM documents
+                WHERE is_active = 1
+                ORDER BY category, name
+            `).all();
+
+            const permissions = db.prepare(`
+                SELECT user_id, document_id, can_view
+                FROM user_document_permissions
+            `).all();
+
+            const permissionMap = {};
+            permissions.forEach(p => {
+                permissionMap[`${p.user_id}-${p.document_id}`] = { can_view: p.can_view };
+            });
+
+            const matrix = users.map(user => {
+                const userPermissions = {};
+                documents.forEach(doc => {
+                    const key = `${user.id}-${doc.id}`;
+                    userPermissions[doc.id] = permissionMap[key] || { can_view: false };
+                });
+                return { user, permissions: userPermissions };
+            });
+
+            res.json({
+                success: true,
+                data: { users, documents, matrix }
+            });
+        } catch (error) {
+            console.error('Error al obtener matriz de permisos de documentos:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al obtener matriz de permisos de documentos'
+            });
+        }
+    }
+
     // Clonar permisos de un usuario a otro
     static clonePermissions(req, res) {
         try {

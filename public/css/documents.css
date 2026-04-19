@@ -1,0 +1,238 @@
+/* ==========================================================================
+   Documents & secure PDF viewer
+   ========================================================================== */
+
+/* Evitar selección/arrastre en las tarjetas de documentos */
+.document-card,
+.document-card * {
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+}
+
+.document-icon {
+    color: #d64545;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+}
+
+/* ---------- PDF Viewer (fullscreen modal) ---------- */
+.pdf-viewer-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 16, 22, 0.96);
+    z-index: 9999;
+    display: none;
+    align-items: stretch;
+    justify-content: center;
+    padding: 0;
+}
+
+.pdf-viewer-modal.active {
+    display: flex;
+}
+
+.pdf-viewer-shell {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    background: #1c2229;
+    color: #fff;
+}
+
+.pdf-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 20px;
+    background: #151a20;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.pdf-viewer-header h3 {
+    font-size: 16px;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pdf-viewer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pdf-btn {
+    background: #2a3138;
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+.pdf-btn:hover { background: #353d46; }
+.pdf-btn-close { background: #a33; border-color: #a33; font-size: 18px; }
+.pdf-btn-close:hover { background: #c44; }
+
+#pdf-page-info {
+    font-size: 13px;
+    opacity: 0.8;
+    min-width: 110px;
+    text-align: center;
+}
+
+.pdf-viewer-body {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    background: #0c1016;
+    padding: 20px;
+    /* Bloquear selección/arrastre */
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+}
+
+#pdf-viewer-canvas-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    position: relative;
+    z-index: 1;
+}
+
+.pdf-canvas {
+    background: #fff;
+    box-shadow: 0 6px 30px rgba(0,0,0,0.5);
+    max-width: 100%;
+    height: auto;
+    /* Protección adicional */
+    -webkit-touch-callout: none; /* iOS: sin menú al mantener pulsado */
+    pointer-events: auto;
+}
+
+/* Watermark diagonal repetido sobre el contenido */
+.pdf-watermark {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    overflow: hidden;
+    transform: rotate(-25deg);
+    opacity: 0.13;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: space-around;
+    justify-content: space-around;
+    gap: 40px 60px;
+    padding: 60px;
+    mix-blend-mode: difference;
+}
+
+.pdf-watermark-text {
+    color: #ff2b2b;
+    font-weight: 700;
+    font-size: 15px;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+}
+
+.pdf-viewer-footer {
+    padding: 10px 20px;
+    background: #151a20;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 12px;
+    text-align: center;
+    opacity: 0.8;
+}
+
+/* Body con PDF abierto: bloqueo de scroll de la página */
+body.pdf-open {
+    overflow: hidden;
+}
+
+/* Blur de seguridad cuando la ventana pierde foco o se minimiza */
+body.pdf-blur .pdf-viewer-body,
+body.pdf-blur .pdf-viewer-header h3,
+body.pdf-blur #pdf-viewer-canvas-container {
+    filter: blur(18px);
+    transition: filter 0.12s ease;
+}
+
+/* ---------- Matriz de permisos de documentos ---------- */
+.matrix-table-wrapper {
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    max-height: 70vh;
+}
+.matrix-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+.matrix-table th,
+.matrix-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #eef0f3;
+    text-align: center;
+}
+.matrix-table th {
+    background: #f6f7f9;
+    position: sticky;
+    top: 0;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+}
+.matrix-table .matrix-user {
+    text-align: left;
+    font-weight: 600;
+    background: #fafbfc;
+    position: sticky;
+    left: 0;
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    cursor: pointer;
+}
+
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge.active { background: #d1fae5; color: #065f46; }
+.badge.inactive { background: #fee2e2; color: #991b1b; }
+
+.btn-icon {
+    background: transparent;
+    border: 1px solid #e5e7eb;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-right: 4px;
+    color: #374151;
+}
+.btn-icon:hover { background: #f3f4f6; }
+.btn-icon.danger { color: #b91c1c; border-color: #fecaca; }
+.btn-icon.danger:hover { background: #fee2e2; }

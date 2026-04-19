@@ -92,17 +92,33 @@ function showPage(pageId) {
     }
 }
 
-// Global Error Handler - SILENCIADO para no mostrar errores molestos
+// Global Error Handler — logea todo y notifica sólo cuando es un error real
+// de la aplicación (no errores de recursos externos como imágenes rotas).
 window.addEventListener('error', (e) => {
-    console.error('Global error:', e.error);
-    // Solo mostrar errores críticos, no todos
-    // Notification.error('Ha ocurrido un error inesperado');
-});
+    console.error('Global error:', e.error || e.message);
+    // Ignorar errores de recursos (imágenes, scripts CDN, etc.)
+    if (e.target && (e.target.tagName === 'IMG' || e.target.tagName === 'LINK' || e.target.tagName === 'SCRIPT')) {
+        return;
+    }
+    if (e.error && typeof Notification !== 'undefined' && Notification.error) {
+        // Sólo notificamos una vez cada 5s para no spamear al usuario
+        if (!window._lastGlobalErr || Date.now() - window._lastGlobalErr > 5000) {
+            window._lastGlobalErr = Date.now();
+            Notification.error('Ha ocurrido un error inesperado');
+        }
+    }
+}, true);
 
 // Handle unhandled promise rejections
 window.addEventListener('unhandledrejection', (e) => {
     console.error('Unhandled promise rejection:', e.reason);
-    // Notification.error('Error en la aplicación');
+    if (typeof Notification !== 'undefined' && Notification.error) {
+        if (!window._lastPromiseErr || Date.now() - window._lastPromiseErr > 5000) {
+            window._lastPromiseErr = Date.now();
+            const msg = (e.reason && e.reason.message) ? e.reason.message : 'Error en la aplicación';
+            Notification.error(msg);
+        }
+    }
 });
 
 // Initialize app when DOM is ready

@@ -20,6 +20,7 @@ const userRoutes = require('./routes/user.routes');
 const reportRoutes = require('./routes/report.routes');
 const permissionRoutes = require('./routes/permission.routes');
 const configRoutes = require('./routes/config.routes');
+const documentRoutes = require('./routes/document.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,7 +39,11 @@ app.use((req, res, next) => {
     // Referrer Policy
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     // Content Security Policy básica
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    // Permitimos blob: para que PDF.js pueda renderizar los PDFs en un worker
+    res.setHeader(
+        'Content-Security-Policy',
+        "frame-ancestors 'self'; worker-src 'self' blob:; child-src 'self' blob:"
+    );
     next();
 });
 
@@ -100,6 +105,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/permissions', permissionRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/documents', documentRoutes);
 
 // Ruta para cualquier otra petición (SPA - Single Page Application)
 // Esto hace que si refrescas la página en /dashboard, no de error 404

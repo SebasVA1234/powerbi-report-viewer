@@ -27,7 +27,13 @@ const API_ENDPOINTS = {
     PERMISSIONS: '/permissions',
     PERMISSIONS_MATRIX: '/permissions/matrix',
     BULK_ASSIGN: '/permissions/bulk-assign',
-    CLONE_PERMISSIONS: '/permissions/clone'
+    CLONE_PERMISSIONS: '/permissions/clone',
+
+    // Documents (PDFs)
+    MY_DOCUMENTS: '/documents/my-documents',
+    DOCUMENTS: '/documents',
+    DOCUMENTS_PERMISSIONS_MATRIX: '/permissions/documents/matrix',
+    DOCUMENTS_BULK_ASSIGN: '/permissions/documents/bulk-assign'
 };
 
 // Utility Functions

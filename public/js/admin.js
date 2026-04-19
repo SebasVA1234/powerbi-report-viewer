@@ -32,6 +32,12 @@ function setupAdminTabs() {
                     case 'users': loadUsers(); break;
                     case 'reports': loadAllReports(); break;
                     case 'permissions': loadPermissionsMatrix(); break;
+                    case 'documents':
+                        if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
+                        break;
+                    case 'doc-permissions':
+                        if (typeof loadDocumentsPermissionsMatrix === 'function') loadDocumentsPermissionsMatrix();
+                        break;
                     case 'settings': loadSettings(); break;
                 }
             }
