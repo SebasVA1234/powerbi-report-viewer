@@ -38,11 +38,25 @@ app.use((req, res, next) => {
     res.setHeader('X-XSS-Protection', '1; mode=block');
     // Referrer Policy
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    // Content Security Policy básica
-    // Permitimos blob: para que PDF.js pueda renderizar los PDFs en un worker
+    // Content Security Policy
+    //  - frame-ancestors 'self'   -> impide que nuestra app sea embebida en sitios ajenos
+    //  - worker-src blob:         -> PDF.js necesita levantar un Web Worker desde blob:
+    //  - frame-src / child-src    -> iframes permitidos: Power BI + Fabric
+    //                                 (child-src es fallback para navegadores viejos)
+    const powerbiFrames = [
+        "https://app.powerbi.com",
+        "https://app.fabric.microsoft.com",
+        "https://*.powerbi.com",
+        "https://*.fabric.microsoft.com"
+    ].join(' ');
     res.setHeader(
         'Content-Security-Policy',
-        "frame-ancestors 'self'; worker-src 'self' blob:; child-src 'self' blob:"
+        [
+            "frame-ancestors 'self'",
+            "worker-src 'self' blob:",
+            `frame-src 'self' ${powerbiFrames}`,
+            `child-src 'self' blob: ${powerbiFrames}`
+        ].join('; ')
     );
     next();
 });
