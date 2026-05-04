@@ -11,8 +11,9 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
     process.exit(1);
 }
 
-// Inicializar base de datos si no existe
-require('./config/init-db');
+// La inicialización de la DB se hace al final, antes de app.listen() —
+// es async ahora porque la capa de DB soporta SQLite y PostgreSQL.
+const { init: initDb } = require('./config/init-db');
 
 // Importar rutas
 const authRoutes = require('./routes/auth.routes');
@@ -21,6 +22,7 @@ const reportRoutes = require('./routes/report.routes');
 const permissionRoutes = require('./routes/permission.routes');
 const configRoutes = require('./routes/config.routes');
 const documentRoutes = require('./routes/document.routes');
+const cotizadorRoutes = require('./routes/cotizador.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -120,6 +122,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/permissions', permissionRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/cotizador', cotizadorRoutes);
 
 // Ruta para cualquier otra petición (SPA - Single Page Application)
 // Esto hace que si refrescas la página en /dashboard, no de error 404
@@ -136,12 +139,21 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Iniciar servidor
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
-    console.log(`📊 Sistema de Gestión de Reportes Power BI activo`);
-    console.log(`🔒 Modo: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}`);
-    if (isProduction) {
-        console.log(`✅ Health check disponible en /api/health`);
+// Iniciar servidor — primero inicializa la DB (async), después escucha
+(async () => {
+    try {
+        await initDb();
+    } catch (err) {
+        console.error('❌ Error inicializando la base de datos:', err);
+        process.exit(1);
     }
-});
+
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+        console.log(`📊 Sistema de Gestión de Reportes Power BI activo`);
+        console.log(`🔒 Modo: ${isProduction ? 'PRODUCCIÓN' : 'DESARROLLO'}`);
+        if (isProduction) {
+            console.log(`✅ Health check disponible en /api/health`);
+        }
+    });
+})();

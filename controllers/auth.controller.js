@@ -1,10 +1,10 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../config/database');
+const db = require('../config/db');
 
 class AuthController {
     // Login de usuario
-    static login(req, res) {
+    static async login(req, res) {
         try {
             const { username, password } = req.body;
 
@@ -16,11 +16,11 @@ class AuthController {
             }
 
             // Buscar usuario por username o email
-            const user = db.prepare(`
-                SELECT id, username, email, password, full_name, role, is_active 
-                FROM users 
+            const user = await db.queryOne(`
+                SELECT id, username, email, password, full_name, role, is_active
+                FROM users
                 WHERE (username = ? OR email = ?) AND is_active = 1
-            `).get(username, username);
+            `, [username, username]);
 
             if (!user) {
                 return res.status(401).json({
@@ -52,15 +52,15 @@ class AuthController {
             );
 
             // Registrar acceso
-            db.prepare(`
+            await db.execute(`
                 INSERT INTO access_logs (user_id, action, ip_address, user_agent)
                 VALUES (?, ?, ?, ?)
-            `).run(
+            `, [
                 user.id,
                 'login',
                 req.ip || 'unknown',
                 req.headers['user-agent'] || 'unknown'
-            );
+            ]);
 
             // Eliminar contraseña del objeto usuario
             delete user.password;
@@ -68,10 +68,7 @@ class AuthController {
             res.json({
                 success: true,
                 message: 'Login exitoso',
-                data: {
-                    user,
-                    token
-                }
+                data: { user, token }
             });
         } catch (error) {
             console.error('Error en login:', error);
@@ -83,14 +80,13 @@ class AuthController {
     }
 
     // Verificar token actual
-    static verify(req, res) {
+    static async verify(req, res) {
         try {
-            // El middleware ya verificó el token
-            const user = db.prepare(`
-                SELECT id, username, email, full_name, role, is_active 
-                FROM users 
+            const user = await db.queryOne(`
+                SELECT id, username, email, full_name, role, is_active
+                FROM users
                 WHERE id = ? AND is_active = 1
-            `).get(req.user.id);
+            `, [req.user.id]);
 
             if (!user) {
                 return res.status(404).json({
@@ -113,7 +109,6 @@ class AuthController {
     }
 
     // Cambiar contraseña - DESHABILITADO para usuarios normales
-    // Solo el administrador puede cambiar contraseñas desde el panel de administración
     static changePassword(req, res) {
         return res.status(403).json({
             success: false,
@@ -122,13 +117,12 @@ class AuthController {
     }
 
     // Logout (registrar en logs)
-    static logout(req, res) {
+    static async logout(req, res) {
         try {
-            // Registrar logout
-            db.prepare(`
+            await db.execute(`
                 INSERT INTO access_logs (user_id, action, ip_address)
                 VALUES (?, ?, ?)
-            `).run(req.user.id, 'logout', req.ip || 'unknown');
+            `, [req.user.id, 'logout', req.ip || 'unknown']);
 
             res.json({
                 success: true,

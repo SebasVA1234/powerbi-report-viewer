@@ -247,6 +247,9 @@ function showSection(sectionName) {
             case 'documents':
                 if (typeof loadMyDocuments === 'function') loadMyDocuments();
                 break;
+            case 'cotizador':
+                if (typeof initCotizador === 'function') initCotizador();
+                break;
             case 'profile': loadProfileData(); break;
             case 'admin': if (Auth.isAdmin()) initializeAdminSection(); break;
         }

@@ -272,6 +272,29 @@ const API = {
             method: 'POST',
             body: JSON.stringify({ userIds })
         });
+    },
+
+    // ========= Cotizador Landed Cost =========
+    async cotizadorListDestinos() {
+        return this.request('/cotizador/destinos');
+    },
+    async cotizadorListCargueras() {
+        return this.request('/cotizador/cargueras');
+    },
+    async cotizadorCalcular(payload) {
+        return this.request('/cotizador/cotizar', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    },
+    async cotizadorGuardar(payload) {
+        return this.request('/cotizador/cotizaciones', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    },
+    async cotizadorHistorico(limit = 20) {
+        return this.request(`/cotizador/cotizaciones?limit=${limit}`);
     }
 };
 

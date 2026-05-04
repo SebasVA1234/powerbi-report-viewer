@@ -1,24 +1,24 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-require('dotenv').config();
+/**
+ * @deprecated  Usar `require('../config/db')` con su API async.
+ *
+ * Este archivo existe SOLO para compatibilidad con controllers que aún
+ * importan `../config/database` y usan la API sincrona de better-sqlite3
+ * (db.prepare(...).run(), db.exec(...), etc.).
+ *
+ * En modo SQLite expone el handle nativo de la nueva capa, asegurando que
+ * todo el proceso usa UNA sola conexión.
+ *
+ * En modo PostgreSQL este import falla — eso es intencional: cualquier
+ * controller que aún use la API legacy tiene que migrarse a la capa async
+ * antes de switchear a postgres.
+ */
+const db = require('./db');
 
-const dbPath = path.resolve(process.env.DB_PATH || './database/powerbi_reports.db');
-const dbDir = path.dirname(dbPath);
-
-// Create database directory if it doesn't exist
-if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
+if (db.driver !== 'sqlite') {
+    throw new Error(
+        `[config/database.js] driver=${db.driver}. Este import legacy solo funciona con DB_DRIVER=sqlite. ` +
+        `Migra el controller que lo importa a la capa async (require('../config/db')).`
+    );
 }
 
-// Create database connection
-const db = new Database(dbPath);
-
-// Enable foreign keys and optimize
-db.pragma('foreign_keys = ON');
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
-
-console.log('Connected to SQLite database');
-
-module.exports = db;
+module.exports = db._native();

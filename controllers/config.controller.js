@@ -1,75 +1,55 @@
-const db = require('../config/database');
+const db = require('../config/db');
 
 // Obtener configuración pública (sin autenticación)
-const getPublicConfig = (req, res) => {
+const getPublicConfig = async (req, res) => {
     try {
         const publicKeys = ['max_report_windows'];
-        
         const placeholders = publicKeys.map(() => '?').join(',');
-        const configs = db.prepare(`
-            SELECT config_key, config_value 
-            FROM system_config 
-            WHERE config_key IN (${placeholders})
-        `).all(...publicKeys);
+        const configs = await db.query(
+            `SELECT config_key, config_value
+             FROM system_config
+             WHERE config_key IN (${placeholders})`,
+            publicKeys
+        );
 
         const configObj = {};
-        configs.forEach(c => {
-            configObj[c.config_key] = c.config_value;
-        });
+        configs.forEach(c => { configObj[c.config_key] = c.config_value; });
 
-        res.json({
-            success: true,
-            data: configObj
-        });
+        res.json({ success: true, data: configObj });
     } catch (error) {
         console.error('Error obteniendo configuración pública:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener configuración'
-        });
+        res.status(500).json({ success: false, message: 'Error al obtener configuración' });
     }
 };
 
 // Obtener todas las configuraciones (solo admin)
-const getAllConfig = (req, res) => {
+const getAllConfig = async (req, res) => {
     try {
-        const configs = db.prepare('SELECT config_key, config_value, description FROM system_config').all();
-        
+        const configs = await db.query(
+            'SELECT config_key, config_value, description FROM system_config'
+        );
         const configObj = {};
         configs.forEach(c => {
-            configObj[c.config_key] = {
-                value: c.config_value,
-                description: c.description
-            };
+            configObj[c.config_key] = { value: c.config_value, description: c.description };
         });
 
-        res.json({
-            success: true,
-            data: configObj
-        });
+        res.json({ success: true, data: configObj });
     } catch (error) {
         console.error('Error obteniendo configuración:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener configuración'
-        });
+        res.status(500).json({ success: false, message: 'Error al obtener configuración' });
     }
 };
 
 // Actualizar una configuración (solo admin)
-const updateConfig = (req, res) => {
+const updateConfig = async (req, res) => {
     try {
         const { key } = req.params;
         const { value } = req.body;
 
         if (value === undefined || value === null) {
-            return res.status(400).json({
-                success: false,
-                message: 'El valor es requerido'
-            });
+            return res.status(400).json({ success: false, message: 'El valor es requerido' });
         }
 
-        // Validaciones específicas
         if (key === 'max_report_windows') {
             const numValue = parseInt(value);
             if (isNaN(numValue) || numValue < 1 || numValue > 10) {
@@ -80,11 +60,12 @@ const updateConfig = (req, res) => {
             }
         }
 
-        const result = db.prepare(`
-            UPDATE system_config 
-            SET config_value = ?, updated_at = CURRENT_TIMESTAMP 
-            WHERE config_key = ?
-        `).run(value.toString(), key);
+        const result = await db.execute(
+            `UPDATE system_config
+             SET config_value = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE config_key = ?`,
+            [value.toString(), key]
+        );
 
         if (result.changes === 0) {
             return res.status(404).json({
@@ -96,22 +77,12 @@ const updateConfig = (req, res) => {
         res.json({
             success: true,
             message: 'Configuración actualizada correctamente',
-            data: {
-                key: key,
-                value: value.toString()
-            }
+            data: { key, value: value.toString() }
         });
     } catch (error) {
         console.error('Error actualizando configuración:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al actualizar configuración'
-        });
+        res.status(500).json({ success: false, message: 'Error al actualizar configuración' });
     }
 };
 
-module.exports = {
-    getPublicConfig,
-    getAllConfig,
-    updateConfig
-};
+module.exports = { getPublicConfig, getAllConfig, updateConfig };

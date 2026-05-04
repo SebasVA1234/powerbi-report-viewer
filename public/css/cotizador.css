@@ -1,0 +1,195 @@
+/* ==========================================================================
+   Cotizador Landed Cost
+   ========================================================================== */
+
+.cotizador-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 24px;
+    margin-bottom: 24px;
+}
+@media (max-width: 1100px) {
+    .cotizador-grid { grid-template-columns: 1fr; }
+}
+
+.cotizador-form.card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.cotizador-form h3 {
+    margin: 0 0 16px;
+    font-size: 16px;
+    color: #111827;
+}
+.cotizador-form .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+@media (max-width: 600px) {
+    .cotizador-form .form-row { grid-template-columns: 1fr; }
+}
+.cotizador-form .form-group { display: flex; flex-direction: column; }
+.cotizador-form label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+.cotizador-form input,
+.cotizador-form select {
+    padding: 9px 11px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    background: #fff;
+}
+.cotizador-form input:focus,
+.cotizador-form select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.cotizador-form .form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+}
+
+/* Resultado */
+.cotizador-resultado {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    min-height: 220px;
+}
+.cotizador-resultado h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: #111827;
+}
+.cotizador-resultado .empty {
+    color: #9ca3af;
+    font-style: italic;
+    text-align: center;
+    padding: 60px 0;
+}
+
+.cot-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.cot-meta-item {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+.cot-meta-item .label {
+    font-size: 11px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.cot-meta-item .value {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    margin-top: 2px;
+}
+
+.cot-escenarios {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+@media (max-width: 700px) {
+    .cot-escenarios { grid-template-columns: 1fr; }
+}
+.cot-escenario {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.cot-escenario .head {
+    background: #1f2937;
+    color: #fff;
+    padding: 10px 14px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.cot-escenario.e1 .head { background: #16a34a; }
+.cot-escenario.e2 .head { background: #2563eb; }
+
+.cot-escenario .body { padding: 12px 14px; }
+.cot-escenario .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+}
+.cot-escenario .row.total {
+    border-top: 1px solid #e5e7eb;
+    padding-top: 8px;
+    margin-top: 6px;
+    font-weight: 700;
+    color: #111827;
+    font-size: 15px;
+}
+.cot-escenario .row .lbl { color: #6b7280; }
+.cot-escenario .row .val { font-variant-numeric: tabular-nums; }
+
+.cot-landed {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 8px 14px;
+    font-weight: 700;
+    text-align: center;
+    border-top: 1px solid #fde68a;
+}
+
+.cotizador-historico-wrap {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 16px 20px;
+}
+.cotizador-historico-wrap .reports-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.cot-hist-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.cot-hist-table th, .cot-hist-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    text-align: left;
+}
+.cot-hist-table th {
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+.cot-hist-empty {
+    padding: 20px;
+    text-align: center;
+    color: #9ca3af;
+    font-style: italic;
+}
