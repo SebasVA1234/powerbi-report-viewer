@@ -23,6 +23,7 @@ const permissionRoutes = require('./routes/permission.routes');
 const configRoutes = require('./routes/config.routes');
 const documentRoutes = require('./routes/document.routes');
 const cotizadorRoutes = require('./routes/cotizador.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -123,6 +124,7 @@ app.use('/api/permissions', permissionRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/cotizador', cotizadorRoutes);
+app.use('/api/_admin', adminRoutes);
 
 // Ruta para cualquier otra petición (SPA - Single Page Application)
 // Esto hace que si refrescas la página en /dashboard, no de error 404
