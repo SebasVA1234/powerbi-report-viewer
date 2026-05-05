@@ -76,6 +76,25 @@ function adaptRow(row, table) {
     return out;
 }
 
+/**
+ * Limpia FKs huerfanas en una tabla antes de insertarla en PG.
+ * SQLite a veces permite valores que apuntan a IDs eliminados; PG es estricto.
+ * Devuelve cuantas filas se modificaron (in-memory) para que el log lo refleje.
+ */
+function cleanOrphanFks(rows, parents, log) {
+    let cleaned = 0;
+    for (const r of rows) {
+        for (const [col, validIds] of Object.entries(parents)) {
+            if (r[col] != null && !validIds.has(r[col])) {
+                r[col] = null;
+                cleaned++;
+            }
+        }
+    }
+    if (cleaned > 0) log.push(`limpiadas ${cleaned} FKs huerfanas antes de migrar`);
+    return cleaned;
+}
+
 async function migrateHandler(req, res) {
     if (process.env.MIGRATION_ENABLED !== '1') {
         return res.status(403).json({
@@ -158,6 +177,72 @@ async function migrateHandler(req, res) {
 
             const cols = t.columns.join(', ');
             const rows = sqlite.prepare(`SELECT ${cols} FROM ${t.name}`).all();
+
+            // Limpiar FKs huerfanas (SQLite es laxo, PG es estricto).
+            // Solo aplicamos a access_logs, que es donde aparecen las orphans.
+            if (t.name === 'access_logs') {
+                const validReports = new Set(
+                    sqlite.prepare('SELECT id FROM reports').all().map(r => r.id)
+                );
+                const validDocs = new Set(
+                    sqlite.prepare('SELECT id FROM documents').all().map(r => r.id)
+                );
+                const validUsers = new Set(
+                    sqlite.prepare('SELECT id FROM users').all().map(r => r.id)
+                );
+                cleanOrphanFks(rows, {
+                    report_id: validReports,
+                    document_id: validDocs
+                }, log);
+                // user_id es NOT NULL: filas con user_id huerfano se descartan
+                const before = rows.length;
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    if (!validUsers.has(rows[i].user_id)) rows.splice(i, 1);
+                }
+                if (rows.length !== before) {
+                    log.push(`descartadas ${before - rows.length} filas access_logs con user_id huerfano`);
+                }
+            }
+            // Idem para user_report_permissions y user_document_permissions
+            if (t.name === 'user_report_permissions') {
+                const validReports = new Set(sqlite.prepare('SELECT id FROM reports').all().map(r => r.id));
+                const validUsers = new Set(sqlite.prepare('SELECT id FROM users').all().map(r => r.id));
+                const before = rows.length;
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    if (!validUsers.has(rows[i].user_id) || !validReports.has(rows[i].report_id)) {
+                        rows.splice(i, 1);
+                    }
+                }
+                if (rows.length !== before) {
+                    log.push(`descartadas ${before - rows.length} filas user_report_permissions huerfanas`);
+                }
+                // granted_by puede ser orphan -> NULL
+                cleanOrphanFks(rows, { granted_by: validUsers }, log);
+            }
+            if (t.name === 'user_document_permissions') {
+                const validDocs = new Set(sqlite.prepare('SELECT id FROM documents').all().map(r => r.id));
+                const validUsers = new Set(sqlite.prepare('SELECT id FROM users').all().map(r => r.id));
+                const before = rows.length;
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    if (!validUsers.has(rows[i].user_id) || !validDocs.has(rows[i].document_id)) {
+                        rows.splice(i, 1);
+                    }
+                }
+                if (rows.length !== before) {
+                    log.push(`descartadas ${before - rows.length} filas user_document_permissions huerfanas`);
+                }
+                cleanOrphanFks(rows, { granted_by: validUsers }, log);
+            }
+            // documents.uploaded_by tambien puede ser huerfana
+            if (t.name === 'documents') {
+                const validUsers = new Set(sqlite.prepare('SELECT id FROM users').all().map(r => r.id));
+                cleanOrphanFks(rows, { uploaded_by: validUsers }, log);
+            }
+            if (t.name === 'cotizaciones_historico') {
+                const validUsers = new Set(sqlite.prepare('SELECT id FROM users').all().map(r => r.id));
+                cleanOrphanFks(rows, { user_id: validUsers }, log);
+            }
+
             const placeholders = t.columns.map((_, i) => `$${i + 1}`).join(', ');
             const insertSql = `INSERT INTO ${t.name} (${cols}) VALUES (${placeholders})`;
 
