@@ -165,3 +165,91 @@ CREATE INDEX IF NOT EXISTS idx_tarifa_carg_vigente ON tarifas_carguera(id_cargue
 CREATE INDEX IF NOT EXISTS idx_tarifa_dest_vigente ON tarifas_destino(id_destino, fecha_inicio, fecha_fin);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_user ON cotizaciones_historico(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_name_unique ON reports(name);
+
+-- ============================================================
+-- PR-1a: RBAC FOUNDATION (Roles + Permisos + Departamentos)
+-- ============================================================
+-- Modelo aditivo: NO reemplaza user_report_permissions ni
+-- user_document_permissions. Ambos siguen en uso. La integración con
+-- los flujos existentes llega en PR-1b.
+
+-- Roles del negocio (gerencia, jefe_*, rrhh, empleado, admin_sistema).
+-- 'level' es jerárquico (mayor = más privilegio); útil para reglas tipo
+-- "un user no puede asignar un rol con level >= que el suyo".
+-- 'is_system'=1 marca los roles que el código depende de y no se borran.
+CREATE TABLE IF NOT EXISTS roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    level INTEGER NOT NULL DEFAULT 10,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Permisos atómicos. code es del estilo 'resource.action' o 'feature.action'.
+CREATE TABLE IF NOT EXISTS permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    resource_type TEXT,
+    action TEXT,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id INTEGER NOT NULL,
+    permission_id INTEGER NOT NULL,
+    PRIMARY KEY (role_id, permission_id),
+    FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions (id) ON DELETE CASCADE
+);
+
+-- Asignación user ↔ rol. Un user puede tener N roles; el conjunto
+-- efectivo de permisos es la unión.
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    granted_by INTEGER,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, role_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE,
+    FOREIGN KEY (granted_by) REFERENCES users (id)
+);
+
+-- Departamentos del organigrama. parent_id permite jerarquía
+-- (Comercial > Ventas / Marketing) si en el futuro hace falta.
+-- is_active=0 archiva sin perder histórico.
+CREATE TABLE IF NOT EXISTS departments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    parent_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES departments (id)
+);
+
+-- Asignación user ↔ departamento. is_head=1 marca al jefe.
+-- Un user puede pertenecer a varios deptos a la vez.
+CREATE TABLE IF NOT EXISTS user_departments (
+    user_id INTEGER NOT NULL,
+    department_id INTEGER NOT NULL,
+    is_head INTEGER NOT NULL DEFAULT 0,
+    granted_by INTEGER,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, department_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments (id) ON DELETE CASCADE,
+    FOREIGN KEY (granted_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id);
+CREATE INDEX IF NOT EXISTS idx_role_perms_role ON role_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_user_depts_user ON user_departments(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_depts_dept ON user_departments(department_id);
+CREATE INDEX IF NOT EXISTS idx_departments_active ON departments(is_active);

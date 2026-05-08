@@ -1,0 +1,42 @@
+/**
+ * RBAC routes (PR-1a)
+ *
+ * Bajo /api/rbac. Lectura: cualquier user logueado puede listar roles,
+ * permisos, departamentos y su propio contexto. Escritura: requiere
+ * permisos explícitos (departments.manage, roles.manage, users.read);
+ * `requirePermission` deja pasar a admin (con system.admin) siempre.
+ */
+const express = require('express');
+const router = express.Router();
+const { authMiddleware } = require('../middleware/auth.middleware');
+const { RbacController, requirePermission } = require('../controllers/rbac.controller');
+
+// Lecturas
+router.get('/roles',           authMiddleware, RbacController.listRoles);
+router.get('/permissions',     authMiddleware, RbacController.listPermissions);
+router.get('/departments',     authMiddleware, RbacController.listDepartments);
+router.get('/me/context',      authMiddleware, RbacController.myContext);
+router.get('/users/:id/context',
+    authMiddleware, requirePermission('users.read'), RbacController.getUserContextById);
+
+// Departamentos (escritura)
+router.post('/departments',
+    authMiddleware, requirePermission('departments.manage'), RbacController.createDepartment);
+router.put('/departments/:id',
+    authMiddleware, requirePermission('departments.manage'), RbacController.updateDepartment);
+router.post('/departments/:id/archive',
+    authMiddleware, requirePermission('departments.manage'), RbacController.archiveDepartment);
+
+// Asignación user ↔ rol
+router.post('/users/:userId/roles/:roleCode',
+    authMiddleware, requirePermission('roles.manage'), RbacController.assignRoleToUser);
+router.delete('/users/:userId/roles/:roleCode',
+    authMiddleware, requirePermission('roles.manage'), RbacController.removeRoleFromUser);
+
+// Asignación user ↔ departamento
+router.post('/users/:userId/departments/:deptId',
+    authMiddleware, requirePermission('departments.manage'), RbacController.assignUserToDepartment);
+router.delete('/users/:userId/departments/:deptId',
+    authMiddleware, requirePermission('departments.manage'), RbacController.removeUserFromDepartment);
+
+module.exports = router;
