@@ -12,10 +12,10 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    plain_password TEXT,
     full_name TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
     is_active INTEGER DEFAULT 1,
+    must_change_password INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

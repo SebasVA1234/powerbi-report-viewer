@@ -1,9 +1,18 @@
 const jwt = require('jsonwebtoken');
 
+// Endpoints permitidos cuando el user tiene must_change_password=1.
+// Cualquier otro endpoint devolverá 403 con code:'PASSWORD_CHANGE_REQUIRED'
+// hasta que cambie su pass.
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+    '/api/auth/change-my-password',
+    '/api/auth/logout',
+    '/api/auth/verify'
+]);
+
 const authMiddleware = (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
-        
+
         if (!token) {
             return res.status(401).json({
                 success: false,
@@ -13,6 +22,20 @@ const authMiddleware = (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
+
+        // Bloqueo por cambio de contraseña pendiente: el user solo puede
+        // golpear el endpoint que cambia su pass (o cerrar sesión).
+        if (decoded.must_change_password) {
+            const fullPath = req.baseUrl + req.path;
+            if (!PASSWORD_CHANGE_ALLOWED_PATHS.has(fullPath)) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'PASSWORD_CHANGE_REQUIRED',
+                    message: 'Debes cambiar tu contraseña antes de continuar'
+                });
+            }
+        }
+
         next();
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
@@ -21,7 +44,7 @@ const authMiddleware = (req, res, next) => {
                 message: 'Token expirado, por favor inicie sesión nuevamente'
             });
         }
-        
+
         return res.status(401).json({
             success: false,
             message: 'Token inválido'

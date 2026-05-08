@@ -16,7 +16,9 @@ const { Pool } = require('pg');
 
 const TABLES = [
     { name: 'users',
-      columns: ['id','username','email','password','plain_password','full_name','role','is_active','created_at','updated_at'],
+      // PR-0b: plain_password fue removida del schema. must_change_password
+      // existe en ambas DBs tras la migración aditiva en init-db.js.
+      columns: ['id','username','email','password','full_name','role','is_active','must_change_password','created_at','updated_at'],
       sequence: 'users_id_seq' },
     { name: 'reports',
       columns: ['id','name','description','embed_url','category','is_active','created_at','updated_at'],

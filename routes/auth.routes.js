@@ -14,4 +14,7 @@ router.get('/verify', authMiddleware, AuthController.verify);
 router.post('/logout', authMiddleware, AuthController.logout);
 router.post('/change-password', authMiddleware, AuthController.changePassword);
 
+// Cambio obligatorio en el primer login (cuando must_change_password=1).
+router.post('/change-my-password', authMiddleware, AuthController.changeMyPassword);
+
 module.exports = router;

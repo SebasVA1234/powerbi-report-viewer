@@ -57,31 +57,82 @@ const Auth = {
     }
 };
 
+// Forzado de cambio de password en el primer login.
+// Si el backend devuelve must_change_password=true, pedimos una nueva
+// pass con prompt() y llamamos al endpoint /auth/change-my-password.
+// La UI definitiva (modal con confirmación, validación, etc.) llega en
+// Fase 2; este flujo es deliberadamente austero para no extender PR-0b
+// más allá del scope de seguridad.
+async function handleForcedPasswordChange(username) {
+    while (true) {
+        const newPass = window.prompt(
+            'Debes cambiar tu contraseña antes de continuar.\n\n' +
+            'Mínimo 8 caracteres.'
+        );
+        if (newPass === null) {
+            // El usuario canceló el prompt — cerramos sesión.
+            await Auth.logout();
+            return false;
+        }
+        if (typeof newPass !== 'string' || newPass.length < 8) {
+            window.alert('La contraseña debe tener al menos 8 caracteres.');
+            continue;
+        }
+        try {
+            const resp = await fetch('/api/auth/change-my-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Utils.getToken()}`
+                },
+                body: JSON.stringify({ new_password: newPass })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                window.alert('Contraseña actualizada. Volvé a iniciar sesión con la nueva.');
+                Utils.removeToken();
+                Utils.removeUser();
+                window.location.reload();
+                return true;
+            }
+            window.alert(data.message || 'No se pudo cambiar la contraseña.');
+        } catch (err) {
+            window.alert('Error de red al cambiar la contraseña.');
+        }
+    }
+}
+
 // Login Form Handler
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             const submitBtn = loginForm.querySelector('button[type="submit"]');
-            
+
             try {
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = '<span>Iniciando sesión...</span>';
-                
-                await Auth.login(username, password);
-                
+
+                const resp = await Auth.login(username, password);
+
+                if (resp && resp.data && resp.data.user && resp.data.user.must_change_password) {
+                    Notification.info('Cambio de contraseña obligatorio');
+                    await handleForcedPasswordChange(username);
+                    return;  // handleForcedPasswordChange recarga la página tras éxito
+                }
+
                 Notification.success('Inicio de sesión exitoso');
-                
+
                 // Redirigir al dashboard
                 setTimeout(() => {
                     showPage('dashboard-page');
                     initializeDashboard();
                 }, 500);
-                
+
             } catch (error) {
                 Notification.error(error.message || 'Error al iniciar sesión');
             } finally {
