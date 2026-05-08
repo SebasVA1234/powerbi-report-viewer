@@ -9,6 +9,14 @@ const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
     '/api/auth/verify'
 ]);
 
+// Endpoints permitidos cuando el JWT trae totp_pending=true (login con
+// pass OK pero falta el código TOTP). Cualquier otro endpoint devolverá
+// 403 con code:'TOTP_REQUIRED' hasta que verifique el código.
+const TOTP_PENDING_ALLOWED_PATHS = new Set([
+    '/api/auth/totp/verify',
+    '/api/auth/logout'
+]);
+
 const authMiddleware = (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
@@ -23,10 +31,22 @@ const authMiddleware = (req, res, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
 
+        const fullPath = req.baseUrl + req.path;
+
+        // Bloqueo por verificación 2FA pendiente.
+        if (decoded.totp_pending) {
+            if (!TOTP_PENDING_ALLOWED_PATHS.has(fullPath)) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'TOTP_REQUIRED',
+                    message: 'Debes verificar tu código 2FA antes de continuar'
+                });
+            }
+        }
+
         // Bloqueo por cambio de contraseña pendiente: el user solo puede
         // golpear el endpoint que cambia su pass (o cerrar sesión).
         if (decoded.must_change_password) {
-            const fullPath = req.baseUrl + req.path;
             if (!PASSWORD_CHANGE_ALLOWED_PATHS.has(fullPath)) {
                 return res.status(403).json({
                     success: false,

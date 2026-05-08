@@ -44,6 +44,36 @@ async function migrateAccessLogsDocCol() {
     }
 }
 
+// PR-0b.1: agrega users.totp_secret y users.totp_enabled (2FA TOTP).
+// Idempotente: detecta el estado y aplica solo lo que falta.
+async function migrateUsersTotpFields() {
+    if (db.driver === 'sqlite') {
+        const cols = await db.query("PRAGMA table_info(users)");
+        const has = name => cols.some(c => c.name === name);
+        if (!has('totp_secret')) {
+            await db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
+            console.log('🔧 Migración: columna totp_secret añadida a users');
+        }
+        if (!has('totp_enabled')) {
+            await db.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0');
+            console.log('🔧 Migración: columna totp_enabled añadida a users');
+        }
+    } else {
+        const cols = await db.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'users'"
+        );
+        const colNames = cols.map(c => c.column_name);
+        if (!colNames.includes('totp_secret')) {
+            await db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
+            console.log('🔧 Migración: columna totp_secret añadida a users');
+        }
+        if (!colNames.includes('totp_enabled')) {
+            await db.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0');
+            console.log('🔧 Migración: columna totp_enabled añadida a users');
+        }
+    }
+}
+
 // PR-0b: borrar columna users.plain_password (riesgo de seguridad) y
 // agregar users.must_change_password (forzar cambio en primer login).
 // Idempotente: detecta el estado y aplica solo lo que falta.
@@ -233,6 +263,7 @@ async function init() {
     await loadSchema();
     await migrateAccessLogsDocCol();
     await migrateUsersAuthFields();
+    await migrateUsersTotpFields();
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();

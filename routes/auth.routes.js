@@ -17,4 +17,14 @@ router.post('/change-password', authMiddleware, AuthController.changePassword);
 // Cambio obligatorio en el primer login (cuando must_change_password=1).
 router.post('/change-my-password', authMiddleware, AuthController.changeMyPassword);
 
+// PR-0b.1: 2FA TOTP.
+//   /totp/setup   -> genera secret y QR (no activa).
+//   /totp/enable  -> verifica primer código y activa 2FA.
+//   /totp/disable -> requiere pass; desactiva.
+//   /totp/verify  -> 2do paso del login para users con 2FA activo.
+router.post('/totp/setup', authMiddleware, AuthController.setupTotp);
+router.post('/totp/enable', authMiddleware, AuthController.enableTotp);
+router.post('/totp/disable', authMiddleware, AuthController.disableTotp);
+router.post('/totp/verify', authMiddleware, AuthController.verifyTotp);
+
 module.exports = router;

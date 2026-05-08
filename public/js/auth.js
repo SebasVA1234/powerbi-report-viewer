@@ -3,13 +3,18 @@ const Auth = {
     async login(username, password) {
         try {
             const response = await API.login(username, password);
-            
+
             if (response.success) {
+                // PR-0b.1: si el backend pide TOTP, NO guardamos sesión todavía.
+                // Devolvemos el response al caller para que maneje el 2do paso.
+                if (response.data && response.data.needs_totp) {
+                    return response;
+                }
                 Utils.setToken(response.data.token);
                 Utils.setUser(response.data.user);
                 return response;
             }
-            
+
             throw new Error(response.message);
         } catch (error) {
             console.error('Login error:', error);
@@ -102,6 +107,45 @@ async function handleForcedPasswordChange(username) {
     }
 }
 
+// PR-0b.1: si el login devuelve needs_totp, pedimos el código de la app
+// autenticadora con prompt() y llamamos /auth/totp/verify usando el
+// totp_token (JWT temporal de 5 min) como Authorization. Si el código
+// es correcto, recibimos el JWT real y guardamos la sesión.
+// UI definitiva (modal con autofocus, retry pulido, recovery codes)
+// llega en Fase 2.
+async function handleTotpRequired(totpToken) {
+    while (true) {
+        const code = window.prompt('Ingresá el código de 6 dígitos de tu app autenticadora (Google Authenticator, Authy, etc.)');
+        if (code === null) {
+            // Cancelado → volvemos al login limpio
+            return false;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            window.alert('Debe ser un código de 6 dígitos.');
+            continue;
+        }
+        try {
+            const resp = await fetch('/api/auth/totp/verify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${totpToken}`
+                },
+                body: JSON.stringify({ code })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                Utils.setToken(data.data.token);
+                Utils.setUser(data.data.user);
+                return true;
+            }
+            window.alert(data.message || 'Código incorrecto.');
+        } catch (err) {
+            window.alert('Error de red al verificar el código.');
+        }
+    }
+}
+
 // Login Form Handler
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');
@@ -118,6 +162,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 submitBtn.innerHTML = '<span>Iniciando sesión...</span>';
 
                 const resp = await Auth.login(username, password);
+
+                // PR-0b.1: 2FA pendiente
+                if (resp && resp.data && resp.data.needs_totp) {
+                    Notification.info('Verificación 2FA requerida');
+                    const ok = await handleTotpRequired(resp.data.totp_token);
+                    if (!ok) {
+                        Notification.error('Verificación 2FA cancelada');
+                        return;
+                    }
+                    Notification.success('Inicio de sesión exitoso');
+                    setTimeout(() => {
+                        showPage('dashboard-page');
+                        initializeDashboard();
+                    }, 500);
+                    return;
+                }
 
                 if (resp && resp.data && resp.data.user && resp.data.user.must_change_password) {
                     Notification.info('Cambio de contraseña obligatorio');
