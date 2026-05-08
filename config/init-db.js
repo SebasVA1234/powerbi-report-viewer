@@ -279,7 +279,10 @@ async function seedRbac() {
         ['hr.read.all',        'hr',         'read.all',  'Ver todos los empleados (RRHH/Gerencia)'],
         ['hr.write',           'hr',         'write',     'Crear, editar empleados'],
         ['hr.documents.upload','hr',         'documents.upload', 'Subir documentos al expediente del empleado'],
-        ['hr.positions.manage','hr',         'positions.manage', 'CRUD de perfiles de cargo']
+        ['hr.positions.manage','hr',         'positions.manage', 'CRUD de perfiles de cargo'],
+        // PR-3b: feriados y banco de días compensados
+        ['hr.holidays.manage', 'hr',         'holidays.manage',  'CRUD de feriados (RRHH)'],
+        ['hr.attendance.manage','hr',        'attendance.manage','Registrar asistencia a feriados (RRHH)']
     ];
     for (const [code, resource_type, action, description] of PERMS) {
         await db.execute(
@@ -352,7 +355,8 @@ async function seedRbac() {
         'users.read', 'departments.manage',
         'reports.read.assigned', 'documents.read.assigned',
         'audit.read',
-        'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage'
+        'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage',
+        'hr.holidays.manage', 'hr.attendance.manage'  // PR-3b
     ]);
 
     // PR-3a: jefes ven a su equipo en RRHH.
@@ -507,6 +511,33 @@ async function seedCotizador() {
     }
 }
 
+// PR-3b: semilla de feriados Ecuador 2026 (los 11 que estaban en
+// FERIADOS.xlsx del usuario). Idempotente: UNIQUE(holiday_date, name).
+// El usuario puede agregar más vía /api/hr/holidays cuando el gobierno
+// decreta extras (is_national=0 para custom).
+async function seedHolidays() {
+    const HOLIDAYS_2026 = [
+        ['2026-01-01', 'Año Nuevo'],
+        ['2026-02-16', 'Carnaval'],
+        ['2026-02-17', 'Carnaval'],
+        ['2026-04-03', 'Viernes Santo'],
+        ['2026-05-01', 'Día del Trabajo'],
+        ['2026-05-23', 'Batalla de Pichincha'],
+        ['2026-08-10', 'Primer Grito de la Independencia'],
+        ['2026-10-09', 'Independencia de Guayaquil'],
+        ['2026-11-02', 'Día de los Difuntos'],
+        ['2026-11-03', 'Independencia de Cuenca'],
+        ['2026-12-25', 'Navidad']
+    ];
+    for (const [date, name] of HOLIDAYS_2026) {
+        await db.execute(
+            insertOrIgnore('holidays', ['holiday_date','name','is_national'], 'holiday_date, name'),
+            [date, name, 1]
+        );
+    }
+    console.log(`📅 Feriados: ${HOLIDAYS_2026.length} feriados Ecuador 2026 sembrados`);
+}
+
 // PR-3a: semilla de perfiles de cargo (los 12 PDFs del directorio
 // PERFILES DE CARGO/ del proyecto se mapean a filas en hr_positions).
 // Idempotente: usa INSERT OR IGNORE / ON CONFLICT por code.
@@ -552,6 +583,8 @@ async function init() {
     // PR-3a: perfiles de cargo. Después de seedRbac porque los CHECKs
     // de hr_positions referencian al modelo de departments por code.
     await seedHrPositions();
+    // PR-3b: feriados Ecuador 2026.
+    await seedHolidays();
     // PR-1c: la migración de categories corre DESPUÉS del seed para
     // capturar las categorías string sembradas (DB virgen) y también
     // las preexistentes en una DB legacy que ya tenía reports/docs.

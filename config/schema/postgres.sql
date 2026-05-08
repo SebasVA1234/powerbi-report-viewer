@@ -345,3 +345,39 @@ CREATE INDEX IF NOT EXISTS idx_hr_employees_manager ON hr_employees(manager_id);
 CREATE INDEX IF NOT EXISTS idx_hr_employees_status ON hr_employees(status);
 CREATE INDEX IF NOT EXISTS idx_hr_documents_employee ON hr_documents(employee_id);
 CREATE INDEX IF NOT EXISTS idx_hr_positions_dept ON hr_positions(department_code);
+
+-- ============================================================
+-- PR-3b: HOLIDAYS + BANCO DE DÍAS COMPENSADOS (ver sqlite.sql)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS holidays (
+    id SERIAL PRIMARY KEY,
+    holiday_date DATE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_national INTEGER DEFAULT 1,
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(holiday_date, name),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_attendance (
+    id SERIAL PRIMARY KEY,
+    holiday_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    schedule_text TEXT,
+    hours_worked NUMERIC(5,2),
+    days_credit NUMERIC(5,2) NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(holiday_id, employee_id),
+    FOREIGN KEY (holiday_id) REFERENCES holidays (id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
+CREATE INDEX IF NOT EXISTS idx_holiday_attendance_emp ON holiday_attendance(employee_id);
+CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holiday_id);

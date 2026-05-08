@@ -30,4 +30,21 @@ router.get('/employees/:id/team',  authMiddleware, HrController.getDirectReports
 router.post('/employees',          authMiddleware, requirePermission('hr.write'), HrController.createEmployee);
 router.put('/employees/:id',       authMiddleware, requirePermission('hr.write'), HrController.updateEmployee);
 
+// PR-3b: Calendario de feriados + banco de días compensados.
+router.get('/holidays',            authMiddleware, HrController.listHolidays);
+router.post('/holidays',
+    authMiddleware, requirePermission('hr.holidays.manage'), HrController.createHoliday);
+router.delete('/holidays/:id',
+    authMiddleware, requirePermission('hr.holidays.manage'), HrController.deleteHoliday);
+
+// Asistencia a feriados (registrar quién trabajó cada feriado).
+router.get('/holidays/:id/attendance',  authMiddleware, HrController.listAttendance);
+router.post('/holidays/:id/attendance',
+    authMiddleware, requirePermission('hr.attendance.manage'), HrController.upsertAttendance);
+router.delete('/attendance/:attendanceId',
+    authMiddleware, requirePermission('hr.attendance.manage'), HrController.deleteAttendance);
+
+// Saldo del banco de días compensados por empleado.
+router.get('/employees/:id/compensated-balance', authMiddleware, HrController.getCompensatedBalance);
+
 module.exports = router;

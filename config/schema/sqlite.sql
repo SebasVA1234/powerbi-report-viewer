@@ -382,3 +382,50 @@ CREATE INDEX IF NOT EXISTS idx_hr_employees_manager ON hr_employees(manager_id);
 CREATE INDEX IF NOT EXISTS idx_hr_employees_status ON hr_employees(status);
 CREATE INDEX IF NOT EXISTS idx_hr_documents_employee ON hr_documents(employee_id);
 CREATE INDEX IF NOT EXISTS idx_hr_positions_dept ON hr_positions(department_code);
+
+-- ============================================================
+-- PR-3b: HOLIDAYS + BANCO DE DÍAS COMPENSADOS
+-- ============================================================
+-- Reemplaza FERIADOS.xlsx. Modelo:
+--   * holidays:  catálogo de feriados (nacionales + custom decretados).
+--                Una fila por (date, name).
+--   * holiday_attendance: registro de quién trabajó cada feriado y con
+--                qué horario. Cada fila acumula 'days_credit' al banco
+--                del empleado.
+--   * El "banco de días compensados" no es una tabla — se calcula como:
+--       sum(holiday_attendance.days_credit) - sum(time_off_requests
+--       de tipo 'feriado_compensado' aprobadas). PR-3c agrega la otra
+--       parte (time_off_requests).
+
+CREATE TABLE IF NOT EXISTS holidays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    holiday_date DATE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_national INTEGER DEFAULT 1,    -- 1 = feriado nacional, 0 = custom decretado
+    is_active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(holiday_date, name),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    holiday_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    schedule_text TEXT,               -- "7:00 a 5:00", "7:00 a 4:30", etc. (informativo)
+    hours_worked REAL,                -- horas reales trabajadas (informativo)
+    days_credit REAL NOT NULL DEFAULT 1,  -- crédito al banco; típicamente 1 día
+    notes TEXT,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(holiday_id, employee_id),
+    FOREIGN KEY (holiday_id) REFERENCES holidays (id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
+CREATE INDEX IF NOT EXISTS idx_holiday_attendance_emp ON holiday_attendance(employee_id);
+CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holiday_id);
