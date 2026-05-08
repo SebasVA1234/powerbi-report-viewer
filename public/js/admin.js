@@ -404,14 +404,33 @@ function showClonePermissionsModal() { Notification.info('Clonación de permisos
 // EDICIÓN DE USUARIOS
 // ==========================================
 
-// Variable para guardar la contraseña actual del usuario que se edita
-let currentEditingUserPassword = '';
+// PR-0b: la columna plain_password fue eliminada del backend. El admin
+// ya no puede leer la pass de otros users. Para resetearla:
+//   - escribir una nueva en el form, o
+//   - dejarla vacía y dar OK -> el backend genera una pass temporal y
+//     la devuelve UNA SOLA VEZ, que mostramos al admin con copiarla.
+
+// Mostrar la contraseña temporal devuelta por el backend.
+// Es un alert nativo intencional: la UI definitiva (modal con copiar)
+// llega en Fase 2 (design system). Lo importante es que el admin
+// NUNCA pueda ver la pass de otra forma.
+function showTempPassword(tempPass, username) {
+    const msg =
+`Contraseña temporal para ${username}:
+
+  ${tempPass}
+
+Cópiela y entrégueselo al usuario por canal seguro.
+El sistema NO la mostrará otra vez.
+El usuario debe cambiarla en su primer ingreso.`;
+    window.alert(msg);
+}
 
 // Función para abrir el modal de edición con los datos del usuario
 function editUser(userId) {
     // Buscar el usuario en la lista que ya tenemos cargada
     const user = currentUsers.find(u => u.id === userId);
-    
+
     if (!user) {
         Notification.error('Usuario no encontrado');
         return;
@@ -424,35 +443,25 @@ function editUser(userId) {
     document.getElementById('edit-user-email').value = user.email;
     document.getElementById('edit-user-role').value = user.role;
     document.getElementById('edit-user-active').value = user.is_active ? '1' : '0';
-    document.getElementById('edit-user-password').value = ''; // Limpiar campo de nueva contraseña
+    document.getElementById('edit-user-password').value = '';
 
-    // Guardar la contraseña actual para mostrarla con el botón del ojo
-    currentEditingUserPassword = user.plain_password || '(no disponible)';
-    document.getElementById('edit-user-current-password').value = '••••••••';
-    document.getElementById('edit-user-current-password').type = 'password';
+    // El campo "contraseña actual" ya no existe en el modelo de seguridad;
+    // si existe en el HTML legacy, lo neutralizamos visualmente.
+    const legacyCurr = document.getElementById('edit-user-current-password');
+    if (legacyCurr) {
+        legacyCurr.value = '(oculto)';
+        legacyCurr.type = 'text';
+        legacyCurr.disabled = true;
+    }
 
     // Mostrar el modal
     document.getElementById('edit-user-modal').classList.add('active');
 }
 
-// Función para mostrar/ocultar la contraseña actual
+// El botón del ojo legacy ahora no muestra nada: la pass es solo conocida
+// por el usuario tras el cambio obligatorio en su primer login.
 function togglePasswordVisibility() {
-    const input = document.getElementById('edit-user-current-password');
-    const eyeIcon = document.getElementById('eye-icon');
-    
-    if (input.type === 'password') {
-        // Mostrar contraseña
-        input.type = 'text';
-        input.value = currentEditingUserPassword;
-        // Cambiar ícono a "ojo tachado"
-        eyeIcon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
-    } else {
-        // Ocultar contraseña
-        input.type = 'password';
-        input.value = '••••••••';
-        // Cambiar ícono a "ojo normal"
-        eyeIcon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
-    }
+    Notification.info('Las contraseñas ya no se almacenan en claro. Para resetear, deja el campo vacío y guarda — recibirás una contraseña temporal de un solo uso.');
 }
 
 // Configurar el formulario de edición cuando la página carga
@@ -474,21 +483,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 is_active: document.getElementById('edit-user-active').value === '1'
             };
 
-            // Solo incluir contraseña si se escribió una nueva
+            // Política de password (PR-0b):
+            //   - newPassword vacío -> NO se toca la contraseña.
+            //   - newPassword '*' (un asterisco) -> reset: el backend genera
+            //     una pass temporal y la devuelve UNA sola vez.
+            //   - newPassword >=6 chars -> se usa esa, must_change_password=1.
             const newPassword = document.getElementById('edit-user-password').value;
-            if (newPassword && newPassword.length >= 6) {
+            if (newPassword === '*') {
+                userData.password = '';  // backend genera temp
+            } else if (newPassword && newPassword.length >= 6) {
                 userData.password = newPassword;
             } else if (newPassword && newPassword.length > 0 && newPassword.length < 6) {
-                Notification.error('La contraseña debe tener al menos 6 caracteres');
+                Notification.error('La contraseña debe tener al menos 6 caracteres (o "*" para generar una temporal)');
                 return;
             }
 
             try {
-                // Enviar los datos al servidor
-                await API.updateUser(id, userData);
+                const resp = await API.updateUser(id, userData);
                 Notification.success('Usuario actualizado correctamente');
+                if (resp && resp.data && resp.data.temp_password) {
+                    showTempPassword(resp.data.temp_password, userData.username);
+                }
                 closeModal('edit-user-modal');
-                loadUsers(); // Recargar la lista de usuarios
+                loadUsers();
             } catch (error) {
                 Notification.error('Error al actualizar: ' + error.message);
             }

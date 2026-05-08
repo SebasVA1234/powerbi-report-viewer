@@ -1,5 +1,19 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const db = require('../config/db');
+
+// Genera una contraseña temporal de 12 chars sin caracteres ambiguos
+// (sin 0/O, 1/l/I). Suficiente entropía para single-use; el usuario
+// está obligado a cambiarla en el primer login (must_change_password).
+function generateTempPassword() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const buf = crypto.randomBytes(12);
+    let out = '';
+    for (let i = 0; i < 12; i++) {
+        out += alphabet[buf[i] % alphabet.length];
+    }
+    return out;
+}
 
 class UserController {
     // Obtener todos los usuarios (solo admin)
@@ -8,8 +22,13 @@ class UserController {
             const { page = 1, limit = 10, search = '' } = req.query;
             const offset = (page - 1) * limit;
 
+            // plain_password fue eliminada en PR-0b: el admin ya no puede
+            // leer la pass de otros users. Para resetearla usa updateUser
+            // con password (nueva) o sin password (genera una temporal y
+            // la devuelve UNA sola vez).
             let baseQuery = `
-                SELECT id, username, email, full_name, role, is_active, plain_password, created_at, updated_at
+                SELECT id, username, email, full_name, role, is_active,
+                       must_change_password, created_at, updated_at
                 FROM users
             `;
             let where = '';
@@ -42,9 +61,6 @@ class UserController {
                      WHERE user_id = ?`,
                     [user.id]
                 );
-                if (user.role === 'admin') {
-                    user.plain_password = '🔒 Protegido';
-                }
             }
 
             res.json({
@@ -95,14 +111,21 @@ class UserController {
     }
 
     // Crear nuevo usuario
+    //
+    // Si se pasa `password` en el body, se usa esa (validada).
+    // Si no, el sistema genera una contraseña temporal aleatoria.
+    // En cualquiera de los dos casos:
+    //   - el user queda con must_change_password=1
+    //   - la respuesta incluye temp_password con el valor en claro UNA SOLA VEZ
+    //     para que el admin pueda comunicárselo al usuario. No queda guardada.
     static async createUser(req, res) {
         try {
             const { username, email, password, full_name, role = 'user' } = req.body;
 
-            if (!username || !email || !password || !full_name) {
-                return res.status(400).json({ success: false, message: 'Todos los campos son requeridos' });
+            if (!username || !email || !full_name) {
+                return res.status(400).json({ success: false, message: 'Usuario, email y nombre son requeridos' });
             }
-            if (password.length < 6) {
+            if (password !== undefined && password.length < 6) {
                 return res.status(400).json({
                     success: false,
                     message: 'La contraseña debe tener al menos 6 caracteres'
@@ -117,11 +140,12 @@ class UserController {
                 return res.status(409).json({ success: false, message: 'El usuario o email ya existe' });
             }
 
-            const hashedPassword = bcrypt.hashSync(password, 10);
+            const tempPassword = password || generateTempPassword();
+            const hashedPassword = bcrypt.hashSync(tempPassword, 10);
             const result = await db.execute(
-                `INSERT INTO users (username, email, password, plain_password, full_name, role)
+                `INSERT INTO users (username, email, password, full_name, role, must_change_password)
                  VALUES (?, ?, ?, ?, ?, ?)`,
-                [username, email, hashedPassword, password, full_name, role]
+                [username, email, hashedPassword, full_name, role, 1]
             );
 
             await db.execute(
@@ -131,8 +155,13 @@ class UserController {
 
             res.status(201).json({
                 success: true,
-                message: 'Usuario creado exitosamente',
-                data: { id: result.lastInsertId, username, email, full_name, role }
+                message: 'Usuario creado exitosamente. La contraseña temporal solo se muestra una vez.',
+                data: {
+                    id: result.lastInsertId,
+                    username, email, full_name, role,
+                    temp_password: tempPassword,
+                    must_change_password: true
+                }
             });
         } catch (error) {
             console.error('Error al crear usuario:', error);
@@ -160,15 +189,37 @@ class UserController {
 
             const updates = [];
             const values = [];
+            let tempPasswordIssued = null;
 
             if (username !== undefined) { updates.push('username = ?'); values.push(username); }
             if (email !== undefined)    { updates.push('email = ?');    values.push(email); }
             if (full_name !== undefined){ updates.push('full_name = ?');values.push(full_name); }
             if (role !== undefined)     { updates.push('role = ?');     values.push(role); }
             if (is_active !== undefined){ updates.push('is_active = ?'); values.push(is_active ? 1 : 0); }
-            if (password !== undefined && password.length >= 6) {
-                updates.push('password = ?');        values.push(bcrypt.hashSync(password, 10));
-                updates.push('plain_password = ?');  values.push(password);
+
+            // Reset de pass por admin:
+            //   - Si admin manda password explícito >=6 chars, se usa ese.
+            //   - Si admin manda password = "" (string vacio), generamos una pass temporal.
+            //   - En ambos casos, must_change_password=1 y la temp_password
+            //     vuelve UNA SOLA VEZ en la respuesta.
+            const wantsResetPassword = password !== undefined;
+            if (wantsResetPassword) {
+                let newPass;
+                if (typeof password === 'string' && password.length >= 6) {
+                    newPass = password;
+                } else if (password === '' || password === null) {
+                    newPass = generateTempPassword();
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'La contraseña debe tener al menos 6 caracteres (o vacía para generar una temporal)'
+                    });
+                }
+                updates.push('password = ?');
+                values.push(bcrypt.hashSync(newPass, 10));
+                updates.push('must_change_password = ?');
+                values.push(1);
+                tempPasswordIssued = newPass;
             }
 
             if (updates.length === 0) {
@@ -186,7 +237,15 @@ class UserController {
                 [req.user.id, `updated_user:${id}`, req.ip || 'unknown']
             );
 
-            res.json({ success: true, message: 'Usuario actualizado exitosamente' });
+            const responseBody = { success: true, message: 'Usuario actualizado exitosamente' };
+            if (tempPasswordIssued) {
+                responseBody.message = 'Usuario actualizado. La contraseña temporal solo se muestra una vez.';
+                responseBody.data = {
+                    temp_password: tempPasswordIssued,
+                    must_change_password: true
+                };
+            }
+            res.json(responseBody);
         } catch (error) {
             console.error('Error al actualizar usuario:', error);
             res.status(500).json({ success: false, message: 'Error al actualizar usuario' });

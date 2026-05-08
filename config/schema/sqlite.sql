@@ -6,10 +6,16 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    plain_password TEXT,
     full_name TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
     is_active INTEGER DEFAULT 1,
+    must_change_password INTEGER DEFAULT 0,
+    -- PR-0b.1: 2FA TOTP. totp_secret es el secret base32; totp_enabled
+    -- pasa a 1 después de que el user verifica el primer código (no
+    -- alcanza con setearlo, hay que probar que la app de autenticación
+    -- está sincronizada).
+    totp_secret TEXT,
+    totp_enabled INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
