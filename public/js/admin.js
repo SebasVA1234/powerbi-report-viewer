@@ -39,6 +39,16 @@ function setupAdminTabs() {
                         if (typeof loadDocumentsPermissionsMatrix === 'function') loadDocumentsPermissionsMatrix();
                         break;
                     case 'settings': loadSettings(); break;
+                    // PR-1d: tabs nuevos
+                    case 'departments':
+                        if (typeof rbacAdmin !== 'undefined') rbacAdmin.loadDepartments();
+                        break;
+                    case 'categories':
+                        if (typeof rbacAdmin !== 'undefined') rbacAdmin.loadCategories();
+                        break;
+                    case 'rbac-permissions':
+                        if (typeof rbacAdmin !== 'undefined') rbacAdmin.switchView('resource');
+                        break;
                 }
             }
         });

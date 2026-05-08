@@ -364,6 +364,26 @@
                                     </svg>
                                     Configuración
                                 </button>
+                                <!-- PR-1d: tabs nuevos para RBAC -->
+                                <button class="tab-btn" data-tab="departments">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                        <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21V11M15 21V11"></path>
+                                    </svg>
+                                    Departamentos
+                                </button>
+                                <button class="tab-btn" data-tab="categories">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                        <path d="M3 7h18M3 12h18M3 17h18"></path>
+                                    </svg>
+                                    Categorías
+                                </button>
+                                <button class="tab-btn" data-tab="rbac-permissions">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                        <path d="M9 12l2 2 4-4"></path>
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                    </svg>
+                                    Permisos RBAC
+                                </button>
                             </div>
 
                             <!-- Tab: Usuarios -->
@@ -502,6 +522,130 @@
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+
+                            <!-- ===== PR-1d: Tabs RBAC ===== -->
+
+                            <!-- Tab: Departamentos -->
+                            <div id="departments-tab" class="tab-content">
+                                <div class="tab-header">
+                                    <h3>Departamentos</h3>
+                                    <button class="btn btn-primary" onclick="rbacAdmin.openCreateDepartment()">+ Nuevo Departamento</button>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Code</th>
+                                                <th>Nombre</th>
+                                                <th>Miembros</th>
+                                                <th>Estado</th>
+                                                <th>Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="departments-tbody">
+                                            <tr><td colspan="5" class="loading">Cargando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Tab: Categorías -->
+                            <div id="categories-tab" class="tab-content">
+                                <div class="tab-header">
+                                    <h3>Categorías de Reportes y Documentos</h3>
+                                    <button class="btn btn-primary" onclick="rbacAdmin.openCreateCategory()">+ Nueva Categoría</button>
+                                </div>
+                                <div class="rbac-filter-row">
+                                    <label>Tipo:</label>
+                                    <select id="categories-type-filter" onchange="rbacAdmin.loadCategories()">
+                                        <option value="">Todas</option>
+                                        <option value="report">Reportes</option>
+                                        <option value="document">Documentos</option>
+                                    </select>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Tipo</th>
+                                                <th>Code</th>
+                                                <th>Nombre</th>
+                                                <th>Estado</th>
+                                                <th>Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="categories-tbody">
+                                            <tr><td colspan="5" class="loading">Cargando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Tab: Permisos RBAC (3 vistas) -->
+                            <div id="rbac-permissions-tab" class="tab-content">
+                                <div class="tab-header">
+                                    <h3>Gestión de Permisos (RBAC + ACL)</h3>
+                                </div>
+                                <div class="rbac-views">
+                                    <button class="rbac-view-btn active" data-view="resource" onclick="rbacAdmin.switchView('resource')">A · Por Recurso</button>
+                                    <button class="rbac-view-btn" data-view="user" onclick="rbacAdmin.switchView('user')">B · Por Usuario</button>
+                                    <button class="rbac-view-btn" data-view="department" onclick="rbacAdmin.switchView('department')">C · Por Departamento</button>
+                                </div>
+
+                                <!-- Vista A: por recurso -->
+                                <div id="rbac-view-resource" class="rbac-view active">
+                                    <p class="rbac-help">¿Quién accede a este recurso? Asigná a usuarios, departamentos o roles.</p>
+                                    <div class="rbac-selector">
+                                        <select id="rbac-resource-type" onchange="rbacAdmin.loadResourcePicker()">
+                                            <option value="report">Reporte</option>
+                                            <option value="document">Documento</option>
+                                            <option value="category">Categoría</option>
+                                        </select>
+                                        <select id="rbac-resource-id" onchange="rbacAdmin.loadAclsForResource()">
+                                            <option value="">— Seleccioná un recurso —</option>
+                                        </select>
+                                        <button class="btn btn-primary btn-sm" onclick="rbacAdmin.openAddAcl()">+ Asignar acceso</button>
+                                    </div>
+                                    <div class="table-container">
+                                        <table class="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Tipo</th>
+                                                    <th>Principal</th>
+                                                    <th>Acciones</th>
+                                                    <th>Concedido</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="rbac-resource-acls-tbody">
+                                                <tr><td colspan="5" class="empty">Seleccioná un recurso arriba.</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Vista B: por usuario -->
+                                <div id="rbac-view-user" class="rbac-view">
+                                    <p class="rbac-help">¿Qué ve este usuario? Roles asignados, departamentos y ACLs directas.</p>
+                                    <div class="rbac-selector">
+                                        <select id="rbac-user-id" onchange="rbacAdmin.loadUserContext()">
+                                            <option value="">— Seleccioná un usuario —</option>
+                                        </select>
+                                    </div>
+                                    <div id="rbac-user-context" class="rbac-context-card"></div>
+                                </div>
+
+                                <!-- Vista C: por departamento -->
+                                <div id="rbac-view-department" class="rbac-view">
+                                    <p class="rbac-help">¿Qué accede todo este departamento? Recursos asignados al depto y miembros.</p>
+                                    <div class="rbac-selector">
+                                        <select id="rbac-dept-id" onchange="rbacAdmin.loadDepartmentContext()">
+                                            <option value="">— Seleccioná un departamento —</option>
+                                        </select>
+                                    </div>
+                                    <div id="rbac-dept-context" class="rbac-context-card"></div>
                                 </div>
                             </div>
                         </section>
@@ -849,6 +993,7 @@
     <script src="js/documents.js"></script>
     <script src="js/cotizador.js"></script>
     <script src="js/admin.js"></script>
+    <script src="js/rbac-admin.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
