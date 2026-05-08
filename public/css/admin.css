@@ -611,3 +611,133 @@
         width: 100%;
     }
 }
+
+/* ===========================================================
+ * PR-1d: estilos para los tabs RBAC (Departamentos, Categorías,
+ * Permisos RBAC con 3 vistas). Diseño austero — el refresh
+ * visual antigravity llega en Fase 2.
+ * =========================================================== */
+
+.rbac-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+.rbac-filter-row select {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.rbac-views {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    flex-wrap: wrap;
+}
+.rbac-view-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid #ccc;
+    background: #fff;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.rbac-view-btn.active {
+    background: #6b21a8;
+    color: #fff;
+    border-color: #6b21a8;
+}
+.rbac-view {
+    display: none;
+    margin-top: 1rem;
+}
+.rbac-view.active {
+    display: block;
+}
+
+.rbac-help {
+    color: #666;
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+}
+
+.rbac-selector {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.rbac-selector select {
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    min-width: 180px;
+    background: #fff;
+}
+
+.rbac-context-card {
+    border: 1px solid #e5e5e5;
+    border-radius: 6px;
+    padding: 1rem;
+    background: #fafafa;
+}
+.rbac-card-section {
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #eee;
+}
+.rbac-card-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+.rbac-card-section h4 { margin: 0 0 0.5rem 0; font-size: 1.05rem; }
+.rbac-card-section h4 small { color: #999; font-weight: normal; }
+.rbac-card-section h5 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #555; }
+
+.chip {
+    display: inline-block;
+    background: #e9d5ff;
+    color: #6b21a8;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin: 0.15rem 0.25rem 0.15rem 0;
+}
+.chip-code {
+    display: inline-block;
+    background: #f5f5f5;
+    color: #444;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: monospace;
+    margin: 0.15rem 0.2rem 0.15rem 0;
+}
+
+.rbac-acl-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px dashed #eee;
+    font-size: 0.85rem;
+}
+.rbac-acl-row:last-child { border-bottom: none; }
+.btn-xs {
+    font-size: 0.7rem !important;
+    padding: 0.2rem 0.5rem !important;
+}
+.empty-inline {
+    color: #999;
+    font-style: italic;
+    font-size: 0.85rem;
+    margin: 0.25rem 0;
+}
+tr.archived td {
+    opacity: 0.5;
+}
