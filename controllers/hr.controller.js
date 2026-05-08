@@ -274,6 +274,234 @@ class HrController {
         }
     }
 
+    // ============================================================
+    // PR-3b: Feriados y banco de días compensados
+    // ============================================================
+    // Reemplaza el FERIADOS.xlsx del usuario. Cada attendance suma 1 día
+    // al banco del empleado; al pedir un día libre tipo 'feriado_compensado'
+    // (PR-3c) se descuenta de ese banco.
+
+    // Listar feriados (cualquier user logueado puede consultar el calendario).
+    // Filtros: ?year=2026, ?from=2026-01-01, ?to=2026-12-31.
+    static async listHolidays(req, res) {
+        try {
+            const { year, from, to } = req.query;
+            const conditions = ['is_active = 1'];
+            const params = [];
+            if (year) {
+                conditions.push("strftime('%Y', holiday_date) = ?");
+                params.push(String(year));
+            }
+            if (from) { conditions.push('holiday_date >= ?'); params.push(from); }
+            if (to)   { conditions.push('holiday_date <= ?'); params.push(to); }
+
+            // PG no tiene strftime — usamos extract.
+            let sql;
+            if (db.driver === 'postgres') {
+                const pgConditions = conditions.map(c =>
+                    c.replace("strftime('%Y', holiday_date) = ?", "EXTRACT(YEAR FROM holiday_date)::text = ?")
+                );
+                sql = `SELECT id, holiday_date, name, description, is_national, is_active, created_at
+                       FROM holidays
+                       WHERE ${pgConditions.join(' AND ')}
+                       ORDER BY holiday_date`;
+            } else {
+                sql = `SELECT id, holiday_date, name, description, is_national, is_active, created_at
+                       FROM holidays
+                       WHERE ${conditions.join(' AND ')}
+                       ORDER BY holiday_date`;
+            }
+            const holidays = await db.query(sql, params);
+            res.json({ success: true, data: { holidays } });
+        } catch (err) {
+            console.error('listHolidays:', err);
+            res.status(500).json({ success: false, message: 'Error al listar feriados' });
+        }
+    }
+
+    // Crear feriado (custom decretado o nacional faltante).
+    // Body: { holiday_date, name, description?, is_national? }
+    static async createHoliday(req, res) {
+        try {
+            const { holiday_date, name, description, is_national } = req.body;
+            if (!holiday_date || !name) {
+                return res.status(400).json({ success: false, message: 'holiday_date y name son requeridos' });
+            }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(holiday_date)) {
+                return res.status(400).json({ success: false, message: 'holiday_date debe ser YYYY-MM-DD' });
+            }
+            const r = await db.execute(
+                `INSERT INTO holidays (holiday_date, name, description, is_national, created_by)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [holiday_date, name, description || null,
+                 is_national === false || is_national === 0 ? 0 : 1, req.user.id]
+            );
+            res.status(201).json({ success: true, data: { id: r.lastInsertId } });
+        } catch (err) {
+            console.error('createHoliday:', err);
+            const msg = err && err.message && err.message.includes('UNIQUE')
+                ? 'Ya existe un feriado con esa fecha y nombre'
+                : 'Error al crear feriado';
+            res.status(500).json({ success: false, message: msg });
+        }
+    }
+
+    static async deleteHoliday(req, res) {
+        try {
+            const { id } = req.params;
+            const h = await db.queryOne('SELECT id FROM holidays WHERE id = ?', [id]);
+            if (!h) return res.status(404).json({ success: false, message: 'Feriado no encontrado' });
+            // Soft-delete preservando histórico (holiday_attendance no se borra).
+            await db.execute('UPDATE holidays SET is_active = 0 WHERE id = ?', [id]);
+            res.json({ success: true, message: 'Feriado archivado' });
+        } catch (err) {
+            console.error('deleteHoliday:', err);
+            res.status(500).json({ success: false, message: 'Error al archivar' });
+        }
+    }
+
+    // Listar quién trabajó en un feriado dado.
+    // Permite a RRHH/Gerencia ver cualquier holiday; a empleados solo si
+    // su attendance está dentro (hr.read.own).
+    static async listAttendance(req, res) {
+        try {
+            const { id } = req.params;  // holiday_id
+            const ctx = await getUserContext(req.user.id, req);
+            const canSeeAll = ctx.isAdmin
+                || ctx.permissions.has('hr.read.all')
+                || ctx.permissions.has('hr.attendance.manage');
+
+            let where = 'a.holiday_id = ?';
+            const params = [id];
+            if (!canSeeAll) {
+                // Solo su propia attendance.
+                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+                if (!me) return res.json({ success: true, data: { attendance: [] } });
+                where += ' AND a.employee_id = ?';
+                params.push(me.id);
+            }
+
+            const rows = await db.query(`
+                SELECT a.id, a.holiday_id, a.employee_id, a.schedule_text,
+                       a.hours_worked, a.days_credit, a.notes, a.created_at,
+                       e.full_name AS employee_name,
+                       d.name AS department_name
+                FROM holiday_attendance a
+                JOIN hr_employees e ON e.id = a.employee_id
+                LEFT JOIN departments d ON d.id = e.department_id
+                WHERE ${where}
+                ORDER BY e.full_name
+            `, params);
+
+            res.json({ success: true, data: { attendance: rows } });
+        } catch (err) {
+            console.error('listAttendance:', err);
+            res.status(500).json({ success: false, message: 'Error al listar asistencia' });
+        }
+    }
+
+    // Registrar (o actualizar) que un empleado trabajó un feriado.
+    // Suma 1 día (o days_credit personalizado) al banco compensado.
+    static async upsertAttendance(req, res) {
+        try {
+            const { id } = req.params;  // holiday_id
+            const { employee_id, schedule_text, hours_worked, days_credit, notes } = req.body;
+            if (!employee_id) {
+                return res.status(400).json({ success: false, message: 'employee_id es requerido' });
+            }
+            const credit = (days_credit !== undefined && !isNaN(Number(days_credit)))
+                ? Number(days_credit) : 1;
+
+            const upsertSql = db.driver === 'sqlite'
+                ? `INSERT INTO holiday_attendance
+                   (holiday_id, employee_id, schedule_text, hours_worked, days_credit, notes, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(holiday_id, employee_id)
+                   DO UPDATE SET schedule_text = excluded.schedule_text,
+                                 hours_worked  = excluded.hours_worked,
+                                 days_credit   = excluded.days_credit,
+                                 notes         = excluded.notes`
+                : `INSERT INTO holiday_attendance
+                   (holiday_id, employee_id, schedule_text, hours_worked, days_credit, notes, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(holiday_id, employee_id)
+                   DO UPDATE SET schedule_text = EXCLUDED.schedule_text,
+                                 hours_worked  = EXCLUDED.hours_worked,
+                                 days_credit   = EXCLUDED.days_credit,
+                                 notes         = EXCLUDED.notes`;
+            await db.execute(upsertSql, [
+                id, employee_id, schedule_text || null,
+                hours_worked || null, credit, notes || null, req.user.id
+            ]);
+            res.status(201).json({ success: true, message: 'Asistencia registrada' });
+        } catch (err) {
+            console.error('upsertAttendance:', err);
+            res.status(500).json({ success: false, message: 'Error al registrar asistencia' });
+        }
+    }
+
+    static async deleteAttendance(req, res) {
+        try {
+            const { attendanceId } = req.params;
+            const r = await db.queryOne('SELECT id FROM holiday_attendance WHERE id = ?', [attendanceId]);
+            if (!r) return res.status(404).json({ success: false, message: 'Registro no encontrado' });
+            await db.execute('DELETE FROM holiday_attendance WHERE id = ?', [attendanceId]);
+            res.json({ success: true, message: 'Asistencia eliminada' });
+        } catch (err) {
+            console.error('deleteAttendance:', err);
+            res.status(500).json({ success: false, message: 'Error al eliminar' });
+        }
+    }
+
+    // Banco de días compensados de un empleado.
+    // Hoy: solo cuenta créditos (PR-3c sumará el debe de time_off_requests).
+    static async getCompensatedBalance(req, res) {
+        try {
+            const { id } = req.params;  // employee_id
+            const ctx = await getUserContext(req.user.id, req);
+            // El propio empleado siempre puede ver su saldo; otros necesitan
+            // hr.read.all o hr.read.team (si es de su equipo).
+            const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+            const isSelf = me && me.id === Number(id);
+            const canSeeAll = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+
+            if (!isSelf && !canSeeAll) {
+                // Para hr.read.team verificamos vía getVisibleEmployeeIds.
+                const visible = await getVisibleEmployeeIds(req.user.id);
+                if (visible !== null && !visible.includes(Number(id))) {
+                    return res.status(403).json({ success: false, message: 'Sin permisos para este empleado' });
+                }
+            }
+
+            const credit = await db.queryOne(`
+                SELECT COALESCE(SUM(days_credit), 0) AS total
+                FROM holiday_attendance
+                WHERE employee_id = ?
+            `, [id]);
+
+            // PR-3c agregará el debe de time_off_requests aprobados.
+            const usedRow = await db.queryOne(`
+                SELECT 0 AS total
+            `);  // placeholder hasta PR-3c
+            const used = Number(usedRow.total || 0);
+            const accrued = Number(credit.total || 0);
+
+            res.json({
+                success: true,
+                data: {
+                    employee_id: Number(id),
+                    days_accrued: accrued,
+                    days_used: used,
+                    balance: accrued - used,
+                    note: 'days_used se contabilizará desde PR-3c (vacaciones / time_off_requests)'
+                }
+            });
+        } catch (err) {
+            console.error('getCompensatedBalance:', err);
+            res.status(500).json({ success: false, message: 'Error al obtener saldo' });
+        }
+    }
+
     static async updateEmployee(req, res) {
         try {
             const { id } = req.params;
