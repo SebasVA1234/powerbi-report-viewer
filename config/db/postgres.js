@@ -59,9 +59,15 @@ async function execute(sql, params = []) {
     const trimmed = sql.trim();
     const isInsert = /^insert\s/i.test(trimmed);
     const hasReturning = /\sreturning\s/i.test(trimmed);
+    // Hotfix PR-1a: si la query tiene ON CONFLICT (junction tables como
+    // role_permissions / user_roles / user_departments tienen PRIMARY KEY
+    // compuesta SIN columna id, así que RETURNING id daría
+    // "column id does not exist"). El caller que usa ON CONFLICT
+    // tampoco necesita lastInsertId — solo le importa que el row exista.
+    const hasOnConflict = /\son\s+conflict\b/i.test(trimmed);
 
     let text = translateToPg(sql);
-    if (isInsert && !hasReturning) {
+    if (isInsert && !hasReturning && !hasOnConflict) {
         // Agregar RETURNING id (el id auto-incremental de la tabla)
         text = text.replace(/;?\s*$/, '') + ' RETURNING id';
     }
