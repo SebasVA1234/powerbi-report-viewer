@@ -39,4 +39,15 @@ router.post('/users/:userId/departments/:deptId',
 router.delete('/users/:userId/departments/:deptId',
     authMiddleware, requirePermission('departments.manage'), RbacController.removeUserFromDepartment);
 
+// PR-1b: Resource ACL — asignar reportes/documentos a user / departamento / rol.
+//   Body de createAcl: { resource_type, resource_id, principal_type, principal_id, actions? }
+router.post('/acl',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.createAcl);
+router.delete('/acl/:id',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.deleteAcl);
+router.get('/acl/resource/:type/:id',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.listAclsForResource);
+router.get('/acl/principal/:type/:id',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.listAclsForPrincipal);
+
 module.exports = router;

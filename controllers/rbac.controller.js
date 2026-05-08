@@ -320,6 +320,115 @@ class RbacController {
             res.status(500).json({ success: false, message: 'Error al cargar contexto del usuario' });
         }
     }
+
+    // -------- Resource ACL (PR-1b) --------
+    // Crear/actualizar una entrada ACL.
+    // Body: { resource_type, resource_id, principal_type, principal_id, actions? }
+    // actions default = ['view'].
+    static async createAcl(req, res) {
+        try {
+            const { resource_type, resource_id, principal_type, principal_id } = req.body;
+            let { actions } = req.body;
+
+            if (!['report','document','category'].includes(resource_type)) {
+                return res.status(400).json({ success: false, message: 'resource_type inválido' });
+            }
+            if (!['user','department','role'].includes(principal_type)) {
+                return res.status(400).json({ success: false, message: 'principal_type inválido' });
+            }
+            if (!resource_id || !principal_id) {
+                return res.status(400).json({ success: false, message: 'resource_id y principal_id requeridos' });
+            }
+            if (!Array.isArray(actions) || actions.length === 0) actions = ['view'];
+            actions = actions.filter(a => ['view','export','edit'].includes(a));
+            if (actions.length === 0) actions = ['view'];
+
+            const actionsJson = JSON.stringify(actions);
+
+            const upsertSql = db.driver === 'sqlite'
+                ? `INSERT INTO resource_acl (resource_type, resource_id, principal_type, principal_id, actions, granted_by)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(resource_type, resource_id, principal_type, principal_id)
+                   DO UPDATE SET actions = excluded.actions, granted_by = excluded.granted_by, granted_at = CURRENT_TIMESTAMP`
+                : `INSERT INTO resource_acl (resource_type, resource_id, principal_type, principal_id, actions, granted_by)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(resource_type, resource_id, principal_type, principal_id)
+                   DO UPDATE SET actions = EXCLUDED.actions, granted_by = EXCLUDED.granted_by, granted_at = CURRENT_TIMESTAMP`;
+
+            await db.execute(upsertSql, [
+                resource_type, resource_id, principal_type, principal_id, actionsJson, req.user.id
+            ]);
+
+            res.status(201).json({ success: true, message: 'ACL creada/actualizada' });
+        } catch (err) {
+            console.error('createAcl:', err);
+            res.status(500).json({ success: false, message: 'Error al crear ACL' });
+        }
+    }
+
+    static async deleteAcl(req, res) {
+        try {
+            const { id } = req.params;
+            const r = await db.queryOne('SELECT id FROM resource_acl WHERE id = ?', [id]);
+            if (!r) return res.status(404).json({ success: false, message: 'ACL no encontrada' });
+            await db.execute('DELETE FROM resource_acl WHERE id = ?', [id]);
+            res.json({ success: true, message: 'ACL eliminada' });
+        } catch (err) {
+            console.error('deleteAcl:', err);
+            res.status(500).json({ success: false, message: 'Error al eliminar ACL' });
+        }
+    }
+
+    // Lista las ACL de un recurso (Vista A: "¿quién tiene acceso a este reporte?").
+    static async listAclsForResource(req, res) {
+        try {
+            const { type, id } = req.params;
+            if (!['report','document','category'].includes(type)) {
+                return res.status(400).json({ success: false, message: 'type inválido' });
+            }
+            const rows = await db.query(`
+                SELECT
+                    a.id, a.resource_type, a.resource_id, a.principal_type, a.principal_id,
+                    a.actions, a.granted_at,
+                    CASE
+                        WHEN a.principal_type = 'user'       THEN u.username
+                        WHEN a.principal_type = 'department' THEN d.name
+                        WHEN a.principal_type = 'role'       THEN r.name
+                    END AS principal_name
+                FROM resource_acl a
+                LEFT JOIN users u       ON a.principal_type = 'user'       AND u.id = a.principal_id
+                LEFT JOIN departments d ON a.principal_type = 'department' AND d.id = a.principal_id
+                LEFT JOIN roles r       ON a.principal_type = 'role'       AND r.id = a.principal_id
+                WHERE a.resource_type = ? AND a.resource_id = ?
+                ORDER BY a.principal_type, a.principal_id
+            `, [type, id]);
+            res.json({ success: true, data: { acls: rows } });
+        } catch (err) {
+            console.error('listAclsForResource:', err);
+            res.status(500).json({ success: false, message: 'Error al listar ACLs' });
+        }
+    }
+
+    // Lista los recursos visibles para un principal (Vista B/C).
+    static async listAclsForPrincipal(req, res) {
+        try {
+            const { type, id } = req.params;
+            if (!['user','department','role'].includes(type)) {
+                return res.status(400).json({ success: false, message: 'type inválido' });
+            }
+            const rows = await db.query(`
+                SELECT id, resource_type, resource_id, principal_type, principal_id,
+                       actions, granted_at
+                FROM resource_acl
+                WHERE principal_type = ? AND principal_id = ?
+                ORDER BY resource_type, resource_id
+            `, [type, id]);
+            res.json({ success: true, data: { acls: rows } });
+        } catch (err) {
+            console.error('listAclsForPrincipal:', err);
+            res.status(500).json({ success: false, message: 'Error al listar ACLs' });
+        }
+    }
 }
 
 module.exports = { RbacController, getUserContext, requirePermission };

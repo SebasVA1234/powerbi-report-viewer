@@ -1,14 +1,22 @@
 const db = require('../config/db');
+const { getUserContext } = require('./rbac.controller');
+const { buildVisibilityFilter, canUserAccessResource } = require('./permission_resolver');
 
 class DocumentController {
-    // Documentos disponibles para el usuario actual
+    // Documentos disponibles para el usuario actual.
+    // PR-1b: visibilidad considera (en orden):
+    //   1. Permiso 'documents.read.all' o admin → todos los docs activos.
+    //   2. user_document_permissions (legacy) → preservado.
+    //   3. resource_acl (nuevo) → asignación a user / departamento / rol.
     static async getMyDocuments(req, res) {
         try {
             const userId = req.user.id;
-            const isAdmin = req.user.role === 'admin';
+            const ctx = await getUserContext(userId, req);
 
             let documents;
-            if (isAdmin) {
+            const filter = await buildVisibilityFilter('document', ctx, userId, 'd');
+
+            if (filter === null) {
                 documents = await db.query(`
                     SELECT
                         d.id, d.name, d.description, d.category,
@@ -24,12 +32,11 @@ class DocumentController {
                     SELECT
                         d.id, d.name, d.description, d.category,
                         d.file_name, d.mime_type, d.file_size, d.is_active, d.created_at,
-                        p.can_view, p.granted_at
+                        1 as can_view
                     FROM documents d
-                    INNER JOIN user_document_permissions p ON d.id = p.document_id
-                    WHERE p.user_id = ? AND d.is_active = 1 AND p.can_view = 1
+                    WHERE d.is_active = 1 AND ${filter.whereClause}
                     ORDER BY d.category, d.name
-                `, [userId]);
+                `, filter.params);
             }
 
             await db.execute(
@@ -111,36 +118,32 @@ class DocumentController {
         }
     }
 
-    // Metadatos de un documento
+    // Metadatos de un documento.
+    // PR-1b: visibilidad pasa por canUserAccessResource (legacy + ACL nueva).
     static async getDocumentById(req, res) {
         try {
             const { id } = req.params;
             const userId = req.user.id;
             const isAdmin = req.user.role === 'admin';
 
-            let document;
-            if (isAdmin) {
-                document = await db.queryOne(`
-                    SELECT id, name, description, category, file_name, mime_type, file_size,
-                           is_active, created_at, updated_at
-                    FROM documents WHERE id = ?
-                `, [id]);
-            } else {
-                document = await db.queryOne(`
-                    SELECT d.id, d.name, d.description, d.category, d.file_name, d.mime_type,
-                           d.file_size, d.is_active, d.created_at, p.can_view
-                    FROM documents d
-                    INNER JOIN user_document_permissions p ON d.id = p.document_id
-                    WHERE d.id = ? AND p.user_id = ? AND p.can_view = 1 AND d.is_active = 1
-                `, [id, userId]);
-            }
+            const document = await db.queryOne(`
+                SELECT id, name, description, category, file_name, mime_type, file_size,
+                       is_active, created_at, updated_at
+                FROM documents WHERE id = ? AND is_active = 1
+            `, [id]);
 
             if (!document) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+
+            const canView = isAdmin || await canUserAccessResource(userId, 'document', Number(id), 'view');
+            if (!canView) {
                 return res.status(404).json({
                     success: false,
                     message: 'Documento no encontrado o sin permisos'
                 });
             }
+            if (!isAdmin) document.can_view = 1;
 
             if (isAdmin) {
                 document.users_with_access = await db.query(`
@@ -158,29 +161,28 @@ class DocumentController {
         }
     }
 
-    // Stream del PDF (renderizado seguro, no descarga)
+    // Stream del PDF (renderizado seguro, no descarga).
+    // PR-1b: visibilidad pasa por canUserAccessResource (legacy + ACL nueva).
     static async streamDocument(req, res) {
         try {
             const { id } = req.params;
             const userId = req.user.id;
             const isAdmin = req.user.role === 'admin';
 
-            let row;
-            if (isAdmin) {
-                row = await db.queryOne(`
-                    SELECT file_data, mime_type, file_name, is_active
-                    FROM documents WHERE id = ?
-                `, [id]);
-            } else {
-                row = await db.queryOne(`
-                    SELECT d.file_data, d.mime_type, d.file_name, d.is_active
-                    FROM documents d
-                    INNER JOIN user_document_permissions p ON d.id = p.document_id
-                    WHERE d.id = ? AND p.user_id = ? AND p.can_view = 1
-                `, [id, userId]);
-            }
+            const row = await db.queryOne(`
+                SELECT file_data, mime_type, file_name, is_active
+                FROM documents WHERE id = ?
+            `, [id]);
 
             if (!row || !row.is_active) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Documento no encontrado'
+                });
+            }
+
+            const canView = isAdmin || await canUserAccessResource(userId, 'document', Number(id), 'view');
+            if (!canView) {
                 return res.status(404).json({
                     success: false,
                     message: 'Documento no encontrado o sin permisos'
