@@ -272,7 +272,14 @@ async function seedRbac() {
         ['documents.write',    'documents',  'write', 'Subir, eliminar documentos'],
         ['cotizador.use',      'cotizador',  'use',   'Usar el cotizador y guardar histórico propio'],
         ['permissions.manage', 'permissions','manage','Asignar/quitar permisos a otros usuarios'],
-        ['audit.read',         'audit',      'read',  'Ver logs de acceso']
+        ['audit.read',         'audit',      'read',  'Ver logs de acceso'],
+        // PR-3a: permisos RRHH
+        ['hr.read.own',        'hr',         'read.own',  'Ver el propio perfil de empleado'],
+        ['hr.read.team',       'hr',         'read.team', 'Ver empleados del propio departamento (jefe)'],
+        ['hr.read.all',        'hr',         'read.all',  'Ver todos los empleados (RRHH/Gerencia)'],
+        ['hr.write',           'hr',         'write',     'Crear, editar empleados'],
+        ['hr.documents.upload','hr',         'documents.upload', 'Subir documentos al expediente del empleado'],
+        ['hr.positions.manage','hr',         'positions.manage', 'CRUD de perfiles de cargo']
     ];
     for (const [code, resource_type, action, description] of PERMS) {
         await db.execute(
@@ -340,16 +347,23 @@ async function seedRbac() {
 
     // RRHH: lectura amplia + manejo de departamentos (para el organigrama
     // que arma RRHH). NO recibe reports.read.all por default — el admin
-    // se lo da explícito si quiere.
+    // se lo da explícito si quiere. PR-3a: + RRHH completo.
     await grantPermsToRole('rrhh', [
         'users.read', 'departments.manage',
         'reports.read.assigned', 'documents.read.assigned',
-        'audit.read'
+        'audit.read',
+        'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage'
     ]);
 
-    // Empleado: lo mínimo.
+    // PR-3a: jefes ven a su equipo en RRHH.
+    for (const j of ['jefe_compras','jefe_ventas','jefe_contabilidad','jefe_marketing']) {
+        await grantPermsToRole(j, ['hr.read.team', 'hr.read.own']);
+    }
+
+    // Empleado: lo mínimo + ver su propio perfil RRHH.
     await grantPermsToRole('empleado', [
-        'reports.read.assigned', 'documents.read.assigned'
+        'reports.read.assigned', 'documents.read.assigned',
+        'hr.read.own'
     ]);
 
     // -------- Asignar admin del sistema al user admin (id=1) --------
@@ -493,6 +507,34 @@ async function seedCotizador() {
     }
 }
 
+// PR-3a: semilla de perfiles de cargo (los 12 PDFs del directorio
+// PERFILES DE CARGO/ del proyecto se mapean a filas en hr_positions).
+// Idempotente: usa INSERT OR IGNORE / ON CONFLICT por code.
+async function seedHrPositions() {
+    const POSITIONS = [
+        // [code, title, department_code, level]
+        ['asist_contable',     'Asistente Contable',           'contabilidad', 'asistente'],
+        ['asist_th',           'Asistente de Talento Humano',  'rrhh',         'asistente'],
+        ['direct_money_op',    'Operador Direct Money',        'direct_money', 'ejecutivo'],
+        ['ejec_compras',       'Ejecutivo de Compras',         'compras',      'ejecutivo'],
+        ['ejec_ventas',        'Ejecutivo de Ventas',          'ventas',       'ejecutivo'],
+        ['ejec_mkt_1',         'Ejecutivo de Marketing Digital 1', 'marketing','ejecutivo'],
+        ['ejec_mkt_2',         'Ejecutivo de Marketing Digital 2', 'marketing','ejecutivo'],
+        ['atencion_cliente',   'Servicio al Cliente',          'ventas',       'asistente'],
+        ['jefe_compras',       'Jefe de Compras',              'compras',      'jefe'],
+        ['jefe_ventas',        'Jefe de Ventas',               'ventas',       'jefe'],
+        ['jefe_contabilidad',  'Jefe de Contabilidad',         'contabilidad', 'jefe'],
+        ['gerente',            'Gerencia',                     'gerencia',     'jefe']
+    ];
+    for (const [code, title, dept, level] of POSITIONS) {
+        await db.execute(
+            insertOrIgnore('hr_positions', ['code','title','department_code','level'], 'code'),
+            [code, title, dept, level]
+        );
+    }
+    console.log(`👥 RRHH: ${POSITIONS.length} perfiles de cargo sembrados`);
+}
+
 async function init() {
     console.log('🔧 Inicializando base de datos...');
     await loadSchema();
@@ -507,6 +549,9 @@ async function init() {
     // PR-1a: semilla RBAC. Corre después de seedUsers para poder asignar
     // admin_sistema al user admin (id=1).
     await seedRbac();
+    // PR-3a: perfiles de cargo. Después de seedRbac porque los CHECKs
+    // de hr_positions referencian al modelo de departments por code.
+    await seedHrPositions();
     // PR-1c: la migración de categories corre DESPUÉS del seed para
     // capturar las categorías string sembradas (DB virgen) y también
     // las preexistentes en una DB legacy que ya tenía reports/docs.

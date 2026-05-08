@@ -28,6 +28,7 @@ const documentRoutes = require('./routes/document.routes');
 const cotizadorRoutes = require('./routes/cotizador.routes');
 const adminRoutes = require('./routes/admin.routes');
 const rbacRoutes = require('./routes/rbac.routes');
+const hrRoutes = require('./routes/hr.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -139,6 +140,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/cotizador', cotizadorRoutes);
 app.use('/api/_admin', adminRoutes);
 app.use('/api/rbac', rbacRoutes);
+app.use('/api/hr', hrRoutes);
 
 // 404 JSON para cualquier ruta /api/* no matcheada por las routes de arriba.
 // Antes el catch-all SPA agarraba estas rutas y devolvía index.html con 200,

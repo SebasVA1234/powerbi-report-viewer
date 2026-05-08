@@ -284,3 +284,64 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type, is_active);
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
+
+-- ============================================================
+-- PR-3a: RRHH BASE (ver sqlite.sql para descripción)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hr_positions (
+    id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    department_code TEXT,
+    profile_pdf_path TEXT,
+    level TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hr_employees (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE,
+    full_name TEXT NOT NULL,
+    doc_id TEXT,
+    email_personal TEXT,
+    phone TEXT,
+    position_id INTEGER,
+    department_id INTEGER,
+    manager_id INTEGER,
+    hire_date DATE,
+    base_salary NUMERIC(12,2),
+    status TEXT DEFAULT 'active' CHECK(status IN ('active','terminated','on_leave')),
+    address TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+    FOREIGN KEY (position_id) REFERENCES hr_positions (id),
+    FOREIGN KEY (department_id) REFERENCES departments (id),
+    FOREIGN KEY (manager_id) REFERENCES hr_employees (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS hr_documents (
+    id SERIAL PRIMARY KEY,
+    employee_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('contract','id_card','certificate','cv','medical','training','other')),
+    name TEXT NOT NULL,
+    description TEXT,
+    storage_key TEXT,
+    file_size INTEGER,
+    mime_type TEXT,
+    uploaded_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_employees_user ON hr_employees(user_id);
+CREATE INDEX IF NOT EXISTS idx_hr_employees_dept ON hr_employees(department_id);
+CREATE INDEX IF NOT EXISTS idx_hr_employees_manager ON hr_employees(manager_id);
+CREATE INDEX IF NOT EXISTS idx_hr_employees_status ON hr_employees(status);
+CREATE INDEX IF NOT EXISTS idx_hr_documents_employee ON hr_documents(employee_id);
+CREATE INDEX IF NOT EXISTS idx_hr_positions_dept ON hr_positions(department_code);
