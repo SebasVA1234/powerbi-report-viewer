@@ -1,0 +1,325 @@
+/**
+ * RBAC Controller (PR-1a, foundation)
+ *
+ * Expone endpoints para gestionar roles, permisos, departamentos y la
+ * asignación user ↔ rol y user ↔ departamento. NO toca el sistema viejo
+ * (user_report_permissions / user_document_permissions): sigue funcionando
+ * en paralelo. La integración del nuevo modelo con auth de reportes/docs
+ * llega en PR-1b.
+ *
+ * Diseño:
+ *   - Helper getUserContext(userId) calcula roles + departments + el set
+ *     completo de permission codes del user. Usable como middleware o
+ *     desde otros controllers en futuras PRs.
+ *   - Las acciones de escritura requieren permiso 'system.admin' o el
+ *     role admin_sistema. La excepción: `users/:id/departments` también
+ *     puede setearlo el user con permiso 'departments.manage' (RRHH).
+ *   - Defensa en profundidad: el endpoint chequea el JWT (authMiddleware
+ *     antes en el router) y el rol admin O el permiso explícito (acá).
+ */
+const db = require('../config/db');
+
+// Devuelve { roles: [...], departments: [...], permissions: Set<code>, isAdmin: bool }
+// para un user dado. Caching simple por request: si req se pasa, se cachea
+// en req._userContext_<userId>.
+async function getUserContext(userId, req = null) {
+    if (req && req[`_userContext_${userId}`]) return req[`_userContext_${userId}`];
+
+    const roles = await db.query(`
+        SELECT r.id, r.code, r.name, r.level, r.is_system
+        FROM roles r
+        INNER JOIN user_roles ur ON ur.role_id = r.id
+        WHERE ur.user_id = ?
+        ORDER BY r.level DESC
+    `, [userId]);
+
+    const departments = await db.query(`
+        SELECT d.id, d.code, d.name, ud.is_head
+        FROM departments d
+        INNER JOIN user_departments ud ON ud.department_id = d.id
+        WHERE ud.user_id = ? AND d.is_active = 1
+        ORDER BY d.name
+    `, [userId]);
+
+    const permRows = await db.query(`
+        SELECT DISTINCT p.code
+        FROM permissions p
+        INNER JOIN role_permissions rp ON rp.permission_id = p.id
+        INNER JOIN user_roles ur ON ur.role_id = rp.role_id
+        WHERE ur.user_id = ?
+    `, [userId]);
+    const permissions = new Set(permRows.map(r => r.code));
+
+    const ctx = {
+        roles,
+        departments,
+        permissions,
+        isAdmin: permissions.has('system.admin') || roles.some(r => r.code === 'admin_sistema')
+    };
+    if (req) req[`_userContext_${userId}`] = ctx;
+    return ctx;
+}
+
+// Middleware factory: exige que req.user (puesto por authMiddleware) tenga
+// el permiso indicado. Si no, 403 code:'PERMISSION_DENIED'.
+function requirePermission(permCode) {
+    return async (req, res, next) => {
+        try {
+            const ctx = await getUserContext(req.user.id, req);
+            if (!ctx.permissions.has(permCode) && !ctx.isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'PERMISSION_DENIED',
+                    message: `Falta permiso: ${permCode}`
+                });
+            }
+            next();
+        } catch (err) {
+            console.error('Error en requirePermission:', err);
+            res.status(500).json({ success: false, message: 'Error de autorización' });
+        }
+    };
+}
+
+class RbacController {
+    // -------- Roles --------
+    static async listRoles(req, res) {
+        try {
+            const roles = await db.query(`
+                SELECT id, code, name, description, level, is_system, created_at
+                FROM roles ORDER BY level DESC, name
+            `);
+            res.json({ success: true, data: { roles } });
+        } catch (err) {
+            console.error('listRoles:', err);
+            res.status(500).json({ success: false, message: 'Error al listar roles' });
+        }
+    }
+
+    // -------- Permisos --------
+    static async listPermissions(req, res) {
+        try {
+            const permissions = await db.query(`
+                SELECT id, code, resource_type, action, description
+                FROM permissions ORDER BY code
+            `);
+            res.json({ success: true, data: { permissions } });
+        } catch (err) {
+            console.error('listPermissions:', err);
+            res.status(500).json({ success: false, message: 'Error al listar permisos' });
+        }
+    }
+
+    // -------- Departamentos --------
+    static async listDepartments(req, res) {
+        try {
+            const { include_archived } = req.query;
+            const where = include_archived === '1' ? '' : 'WHERE is_active = 1';
+            const departments = await db.query(`
+                SELECT d.id, d.code, d.name, d.description, d.parent_id,
+                       d.is_active, d.created_at, d.updated_at,
+                       (SELECT COUNT(*) FROM user_departments ud WHERE ud.department_id = d.id) AS member_count
+                FROM departments d
+                ${where}
+                ORDER BY d.name
+            `);
+            res.json({ success: true, data: { departments } });
+        } catch (err) {
+            console.error('listDepartments:', err);
+            res.status(500).json({ success: false, message: 'Error al listar departamentos' });
+        }
+    }
+
+    static async createDepartment(req, res) {
+        try {
+            const { code, name, description, parent_id } = req.body;
+            if (!code || !name) {
+                return res.status(400).json({ success: false, message: 'code y name son requeridos' });
+            }
+            if (!/^[a-z][a-z0-9_]{1,31}$/.test(code)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'code debe ser snake_case (a-z, 0-9, _) y empezar con letra'
+                });
+            }
+            const exists = await db.queryOne('SELECT id FROM departments WHERE code = ?', [code]);
+            if (exists) {
+                return res.status(409).json({ success: false, message: 'Ya existe un departamento con ese code' });
+            }
+            const r = await db.execute(
+                'INSERT INTO departments (code, name, description, parent_id) VALUES (?, ?, ?, ?)',
+                [code, name, description || null, parent_id || null]
+            );
+            res.status(201).json({ success: true, data: { id: r.lastInsertId, code, name } });
+        } catch (err) {
+            console.error('createDepartment:', err);
+            res.status(500).json({ success: false, message: 'Error al crear departamento' });
+        }
+    }
+
+    static async updateDepartment(req, res) {
+        try {
+            const { id } = req.params;
+            const { name, description, parent_id, is_active } = req.body;
+            const dept = await db.queryOne('SELECT id FROM departments WHERE id = ?', [id]);
+            if (!dept) {
+                return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
+            }
+            const updates = [];
+            const values = [];
+            if (name !== undefined)        { updates.push('name = ?');        values.push(name); }
+            if (description !== undefined) { updates.push('description = ?'); values.push(description); }
+            if (parent_id !== undefined)   { updates.push('parent_id = ?');   values.push(parent_id || null); }
+            if (is_active !== undefined)   { updates.push('is_active = ?');   values.push(is_active ? 1 : 0); }
+            if (updates.length === 0) {
+                return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+            }
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            values.push(id);
+            await db.execute(`UPDATE departments SET ${updates.join(', ')} WHERE id = ?`, values);
+            res.json({ success: true, message: 'Departamento actualizado' });
+        } catch (err) {
+            console.error('updateDepartment:', err);
+            res.status(500).json({ success: false, message: 'Error al actualizar departamento' });
+        }
+    }
+
+    static async archiveDepartment(req, res) {
+        try {
+            const { id } = req.params;
+            const dept = await db.queryOne('SELECT id, code FROM departments WHERE id = ?', [id]);
+            if (!dept) {
+                return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
+            }
+            await db.execute(
+                'UPDATE departments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [id]
+            );
+            res.json({ success: true, message: 'Departamento archivado' });
+        } catch (err) {
+            console.error('archiveDepartment:', err);
+            res.status(500).json({ success: false, message: 'Error al archivar departamento' });
+        }
+    }
+
+    // -------- Asignaciones user ↔ rol --------
+    static async assignRoleToUser(req, res) {
+        try {
+            const { userId, roleCode } = req.params;
+            const user = await db.queryOne('SELECT id FROM users WHERE id = ?', [userId]);
+            if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+            const role = await db.queryOne('SELECT id FROM roles WHERE code = ?', [roleCode]);
+            if (!role) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
+
+            const onConflict = db.driver === 'sqlite'
+                ? 'INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_by) VALUES (?, ?, ?)'
+                : 'INSERT INTO user_roles (user_id, role_id, granted_by) VALUES (?, ?, ?) ON CONFLICT (user_id, role_id) DO NOTHING';
+            await db.execute(onConflict, [user.id, role.id, req.user.id]);
+            res.json({ success: true, message: 'Rol asignado' });
+        } catch (err) {
+            console.error('assignRoleToUser:', err);
+            res.status(500).json({ success: false, message: 'Error al asignar rol' });
+        }
+    }
+
+    static async removeRoleFromUser(req, res) {
+        try {
+            const { userId, roleCode } = req.params;
+            const role = await db.queryOne('SELECT id FROM roles WHERE code = ?', [roleCode]);
+            if (!role) return res.status(404).json({ success: false, message: 'Rol no encontrado' });
+            await db.execute('DELETE FROM user_roles WHERE user_id = ? AND role_id = ?', [userId, role.id]);
+            res.json({ success: true, message: 'Rol removido' });
+        } catch (err) {
+            console.error('removeRoleFromUser:', err);
+            res.status(500).json({ success: false, message: 'Error al remover rol' });
+        }
+    }
+
+    // -------- Asignaciones user ↔ departamento --------
+    static async assignUserToDepartment(req, res) {
+        try {
+            const { userId, deptId } = req.params;
+            const { is_head } = req.body || {};
+            const user = await db.queryOne('SELECT id FROM users WHERE id = ?', [userId]);
+            if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+            const dept = await db.queryOne('SELECT id FROM departments WHERE id = ? AND is_active = 1', [deptId]);
+            if (!dept) return res.status(404).json({ success: false, message: 'Departamento no encontrado o archivado' });
+
+            const onConflict = db.driver === 'sqlite'
+                ? 'INSERT OR IGNORE INTO user_departments (user_id, department_id, is_head, granted_by) VALUES (?, ?, ?, ?)'
+                : 'INSERT INTO user_departments (user_id, department_id, is_head, granted_by) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, department_id) DO NOTHING';
+            await db.execute(onConflict, [user.id, dept.id, is_head ? 1 : 0, req.user.id]);
+
+            // Si se pasó is_head=true, actualizamos en caso de fila pre-existente.
+            if (is_head) {
+                await db.execute(
+                    'UPDATE user_departments SET is_head = 1 WHERE user_id = ? AND department_id = ?',
+                    [user.id, dept.id]
+                );
+            }
+            res.json({ success: true, message: 'Usuario asignado al departamento' });
+        } catch (err) {
+            console.error('assignUserToDepartment:', err);
+            res.status(500).json({ success: false, message: 'Error al asignar departamento' });
+        }
+    }
+
+    static async removeUserFromDepartment(req, res) {
+        try {
+            const { userId, deptId } = req.params;
+            await db.execute(
+                'DELETE FROM user_departments WHERE user_id = ? AND department_id = ?',
+                [userId, deptId]
+            );
+            res.json({ success: true, message: 'Usuario removido del departamento' });
+        } catch (err) {
+            console.error('removeUserFromDepartment:', err);
+            res.status(500).json({ success: false, message: 'Error al remover del departamento' });
+        }
+    }
+
+    // -------- Contexto del user actual --------
+    // Útil para que el frontend sepa qué puede hacer sin tener que
+    // golpear cada endpoint y leer el 403.
+    static async myContext(req, res) {
+        try {
+            const ctx = await getUserContext(req.user.id, req);
+            res.json({
+                success: true,
+                data: {
+                    roles: ctx.roles,
+                    departments: ctx.departments,
+                    permissions: Array.from(ctx.permissions),
+                    isAdmin: ctx.isAdmin
+                }
+            });
+        } catch (err) {
+            console.error('myContext:', err);
+            res.status(500).json({ success: false, message: 'Error al cargar contexto' });
+        }
+    }
+
+    // Contexto de OTRO user (admin only).
+    static async getUserContextById(req, res) {
+        try {
+            const { id } = req.params;
+            const user = await db.queryOne('SELECT id, username, email, full_name FROM users WHERE id = ?', [id]);
+            if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+            const ctx = await getUserContext(user.id);
+            res.json({
+                success: true,
+                data: {
+                    user,
+                    roles: ctx.roles,
+                    departments: ctx.departments,
+                    permissions: Array.from(ctx.permissions)
+                }
+            });
+        } catch (err) {
+            console.error('getUserContextById:', err);
+            res.status(500).json({ success: false, message: 'Error al cargar contexto del usuario' });
+        }
+    }
+}
+
+module.exports = { RbacController, getUserContext, requirePermission };

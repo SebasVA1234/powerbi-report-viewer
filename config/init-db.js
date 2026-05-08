@@ -137,6 +137,151 @@ function insertOrIgnore(table, columns, conflictTarget) {
     }
 }
 
+// PR-1a: semilla del modelo RBAC.
+// - 9 roles del negocio (con is_system=1 los iniciales).
+// - 8 departamentos formales.
+// - ~15 permisos atómicos.
+// - role_permissions: gerencia/jefe_innovacion/admin_sistema reciben todos
+//   los permisos; jefes de área los suyos; rrhh los de RRHH+lectura;
+//   empleado los mínimos.
+// - El user admin (id=1) recibe el rol admin_sistema y se asigna al
+//   departamento Gerencia. Idempotente: usa INSERT OR IGNORE / ON CONFLICT.
+async function seedRbac() {
+    // -------- Roles --------
+    const ROLES = [
+        ['admin_sistema',  'Administrador del Sistema', 100, 'Cuenta técnica de mantenimiento. Acceso total.'],
+        ['gerencia',       'Gerencia',                  90,  'Gerentes principales. Acceso total al negocio.'],
+        ['jefe_innovacion','Jefe de Innovación',        90,  'Mismos permisos que Gerencia (rol separado para el organigrama).'],
+        ['jefe_compras',   'Jefe de Compras',           70,  'Gestiona el equipo de Compras.'],
+        ['jefe_ventas',    'Jefe de Ventas',            70,  'Gestiona el equipo de Ventas.'],
+        ['jefe_contabilidad','Jefe de Contabilidad',    70,  'Gestiona el equipo de Contabilidad.'],
+        ['jefe_marketing', 'Jefe de Marketing',         70,  'Gestiona el equipo de Marketing.'],
+        ['rrhh',           'Recursos Humanos',          50,  'Gestiona empleados, vacaciones, certificados.'],
+        ['empleado',       'Empleado',                  10,  'Acceso a recursos asignados y a su propio perfil.']
+    ];
+    for (const [code, name, level, description] of ROLES) {
+        await db.execute(
+            insertOrIgnore('roles', ['code','name','level','description','is_system'], 'code'),
+            [code, name, level, description, 1]
+        );
+    }
+
+    // -------- Permisos --------
+    const PERMS = [
+        ['system.admin',       'system',     'admin', 'Acceso total al sistema'],
+        ['users.read',         'users',      'read',  'Listar y ver usuarios'],
+        ['users.write',        'users',      'write', 'Crear, editar, eliminar usuarios'],
+        ['roles.manage',       'roles',      'manage','Asignar y quitar roles'],
+        ['departments.manage', 'departments','manage','CRUD de departamentos'],
+        ['categories.manage',  'categories', 'manage','CRUD de categorías de reportes/documentos'],
+        ['reports.read.all',   'reports',    'read.all',     'Ver todos los reportes'],
+        ['reports.read.assigned','reports',  'read.assigned','Ver reportes asignados'],
+        ['reports.write',      'reports',    'write', 'Crear, editar, eliminar reportes'],
+        ['documents.read.all', 'documents',  'read.all',     'Ver todos los documentos'],
+        ['documents.read.assigned','documents','read.assigned','Ver documentos asignados'],
+        ['documents.write',    'documents',  'write', 'Subir, eliminar documentos'],
+        ['cotizador.use',      'cotizador',  'use',   'Usar el cotizador y guardar histórico propio'],
+        ['permissions.manage', 'permissions','manage','Asignar/quitar permisos a otros usuarios'],
+        ['audit.read',         'audit',      'read',  'Ver logs de acceso']
+    ];
+    for (const [code, resource_type, action, description] of PERMS) {
+        await db.execute(
+            insertOrIgnore('permissions', ['code','resource_type','action','description'], 'code'),
+            [code, resource_type, action, description]
+        );
+    }
+
+    // -------- Departamentos --------
+    const DEPTS = [
+        ['gerencia',     'Gerencia'],
+        ['compras',      'Compras'],
+        ['ventas',       'Ventas'],
+        ['contabilidad', 'Contabilidad'],
+        ['marketing',    'Marketing'],
+        ['innovacion',   'Innovación'],
+        ['rrhh',         'RRHH'],
+        ['direct_money', 'Direct Money']
+    ];
+    for (const [code, name] of DEPTS) {
+        await db.execute(
+            insertOrIgnore('departments', ['code','name'], 'code'),
+            [code, name]
+        );
+    }
+
+    // -------- Mapping role_permissions --------
+    // Helper: dar todos los permisos a un rol.
+    async function grantAllToRole(roleCode) {
+        const role = await db.queryOne('SELECT id FROM roles WHERE code = ?', [roleCode]);
+        if (!role) return;
+        const perms = await db.query('SELECT id FROM permissions');
+        for (const p of perms) {
+            const onConflict = db.driver === 'sqlite'
+                ? 'INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)'
+                : 'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?) ON CONFLICT (role_id, permission_id) DO NOTHING';
+            await db.execute(onConflict, [role.id, p.id]);
+        }
+    }
+    async function grantPermsToRole(roleCode, permCodes) {
+        const role = await db.queryOne('SELECT id FROM roles WHERE code = ?', [roleCode]);
+        if (!role) return;
+        for (const code of permCodes) {
+            const perm = await db.queryOne('SELECT id FROM permissions WHERE code = ?', [code]);
+            if (!perm) continue;
+            const onConflict = db.driver === 'sqlite'
+                ? 'INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)'
+                : 'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?) ON CONFLICT (role_id, permission_id) DO NOTHING';
+            await db.execute(onConflict, [role.id, perm.id]);
+        }
+    }
+
+    await grantAllToRole('admin_sistema');
+    await grantAllToRole('gerencia');
+    await grantAllToRole('jefe_innovacion');
+
+    // Jefes de área: los suyos + lectura básica + cotizador.
+    const jefeBasePerms = [
+        'reports.read.assigned', 'documents.read.assigned',
+        'cotizador.use', 'audit.read'
+    ];
+    for (const j of ['jefe_compras','jefe_ventas','jefe_contabilidad','jefe_marketing']) {
+        await grantPermsToRole(j, jefeBasePerms);
+    }
+
+    // RRHH: lectura amplia + manejo de departamentos (para el organigrama
+    // que arma RRHH). NO recibe reports.read.all por default — el admin
+    // se lo da explícito si quiere.
+    await grantPermsToRole('rrhh', [
+        'users.read', 'departments.manage',
+        'reports.read.assigned', 'documents.read.assigned',
+        'audit.read'
+    ]);
+
+    // Empleado: lo mínimo.
+    await grantPermsToRole('empleado', [
+        'reports.read.assigned', 'documents.read.assigned'
+    ]);
+
+    // -------- Asignar admin del sistema al user admin (id=1) --------
+    const adminUser = await db.queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
+    const adminRole = await db.queryOne('SELECT id FROM roles WHERE code = ?', ['admin_sistema']);
+    if (adminUser && adminRole) {
+        const ur = db.driver === 'sqlite'
+            ? 'INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_by) VALUES (?, ?, ?)'
+            : 'INSERT INTO user_roles (user_id, role_id, granted_by) VALUES (?, ?, ?) ON CONFLICT (user_id, role_id) DO NOTHING';
+        await db.execute(ur, [adminUser.id, adminRole.id, adminUser.id]);
+    }
+    const gerenciaDept = await db.queryOne('SELECT id FROM departments WHERE code = ?', ['gerencia']);
+    if (adminUser && gerenciaDept) {
+        const ud = db.driver === 'sqlite'
+            ? 'INSERT OR IGNORE INTO user_departments (user_id, department_id, is_head, granted_by) VALUES (?, ?, ?, ?)'
+            : 'INSERT INTO user_departments (user_id, department_id, is_head, granted_by) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, department_id) DO NOTHING';
+        await db.execute(ud, [adminUser.id, gerenciaDept.id, 1, adminUser.id]);
+    }
+
+    console.log('🛡️  RBAC: 9 roles, 15 permisos, 8 departamentos sembrados; admin asignado a Gerencia.');
+}
+
 async function seedSystemConfig() {
     await db.execute(
         insertOrIgnore('system_config', ['config_key', 'config_value', 'description'], 'config_key'),
@@ -269,6 +414,9 @@ async function init() {
     await seedSampleReports();
     await seedSamplePermission();
     await seedCotizador();
+    // PR-1a: semilla RBAC. Corre después de seedUsers para poder asignar
+    // admin_sistema al user admin (id=1).
+    await seedRbac();
     console.log('✅ Base de datos inicializada correctamente');
     console.log('👤 Usuario admin: admin / admin123');
     console.log('👤 Usuario test: usuario1 / user123');
