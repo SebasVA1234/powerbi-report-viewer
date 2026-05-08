@@ -409,6 +409,111 @@ class RbacController {
         }
     }
 
+    // -------- Categorías (PR-1c) --------
+    static async listCategories(req, res) {
+        try {
+            const { type, include_archived } = req.query;
+            const conditions = [];
+            const params = [];
+            if (type && ['report', 'document'].includes(type)) {
+                conditions.push('type = ?');
+                params.push(type);
+            }
+            if (include_archived !== '1') conditions.push('is_active = 1');
+            const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+            const rows = await db.query(`
+                SELECT id, type, code, name, description, parent_id,
+                       is_active, created_at, updated_at
+                FROM categories
+                ${where}
+                ORDER BY type, name
+            `, params);
+            res.json({ success: true, data: { categories: rows } });
+        } catch (err) {
+            console.error('listCategories:', err);
+            res.status(500).json({ success: false, message: 'Error al listar categorías' });
+        }
+    }
+
+    static async createCategory(req, res) {
+        try {
+            const { type, code, name, description, parent_id } = req.body;
+            if (!['report', 'document'].includes(type)) {
+                return res.status(400).json({ success: false, message: 'type debe ser report o document' });
+            }
+            if (!code || !name) {
+                return res.status(400).json({ success: false, message: 'code y name son requeridos' });
+            }
+            if (!/^[a-z][a-z0-9_]{1,31}$/.test(code)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'code debe ser snake_case (a-z, 0-9, _) y empezar con letra'
+                });
+            }
+            const exists = await db.queryOne(
+                'SELECT id FROM categories WHERE type = ? AND code = ?',
+                [type, code]
+            );
+            if (exists) {
+                return res.status(409).json({ success: false, message: 'Ya existe una categoría con ese type+code' });
+            }
+            const r = await db.execute(
+                'INSERT INTO categories (type, code, name, description, parent_id) VALUES (?, ?, ?, ?, ?)',
+                [type, code, name, description || null, parent_id || null]
+            );
+            res.status(201).json({ success: true, data: { id: r.lastInsertId, type, code, name } });
+        } catch (err) {
+            console.error('createCategory:', err);
+            res.status(500).json({ success: false, message: 'Error al crear categoría' });
+        }
+    }
+
+    static async updateCategory(req, res) {
+        try {
+            const { id } = req.params;
+            const { name, description, parent_id, is_active } = req.body;
+            const cat = await db.queryOne('SELECT id FROM categories WHERE id = ?', [id]);
+            if (!cat) {
+                return res.status(404).json({ success: false, message: 'Categoría no encontrada' });
+            }
+            const updates = [];
+            const values = [];
+            if (name !== undefined)        { updates.push('name = ?');        values.push(name); }
+            if (description !== undefined) { updates.push('description = ?'); values.push(description); }
+            if (parent_id !== undefined)   { updates.push('parent_id = ?');   values.push(parent_id || null); }
+            if (is_active !== undefined)   { updates.push('is_active = ?');   values.push(is_active ? 1 : 0); }
+            if (updates.length === 0) {
+                return res.status(400).json({ success: false, message: 'No hay campos para actualizar' });
+            }
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            values.push(id);
+            await db.execute(`UPDATE categories SET ${updates.join(', ')} WHERE id = ?`, values);
+            res.json({ success: true, message: 'Categoría actualizada' });
+        } catch (err) {
+            console.error('updateCategory:', err);
+            res.status(500).json({ success: false, message: 'Error al actualizar categoría' });
+        }
+    }
+
+    static async archiveCategory(req, res) {
+        try {
+            const { id } = req.params;
+            const cat = await db.queryOne('SELECT id FROM categories WHERE id = ?', [id]);
+            if (!cat) {
+                return res.status(404).json({ success: false, message: 'Categoría no encontrada' });
+            }
+            await db.execute(
+                'UPDATE categories SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [id]
+            );
+            res.json({ success: true, message: 'Categoría archivada' });
+        } catch (err) {
+            console.error('archiveCategory:', err);
+            res.status(500).json({ success: false, message: 'Error al archivar categoría' });
+        }
+    }
+
     // Lista los recursos visibles para un principal (Vista B/C).
     static async listAclsForPrincipal(req, res) {
         try {

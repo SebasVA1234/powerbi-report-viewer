@@ -285,3 +285,32 @@ CREATE TABLE IF NOT EXISTS resource_acl (
 
 CREATE INDEX IF NOT EXISTS idx_acl_resource ON resource_acl(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_acl_principal ON resource_acl(principal_type, principal_id);
+
+-- ============================================================
+-- PR-1c: CATEGORIES — categorías de reportes y documentos
+-- ============================================================
+-- Reemplaza el campo libre reports.category / documents.category (string)
+-- por una FK a una tabla normalizada. Permite:
+--   * Asignar permisos a una categoría (ACL principal_type='category' o
+--     resource_type='category') y heredar a sus recursos.
+--   * Jerarquía con parent_id (ej: "Comercial" > "Ventas" > "Tienda Online")
+--   * Soft-delete con is_active.
+-- type='report' | 'document' separa los namespaces.
+-- Migración aditiva: las columnas string siguen existiendo durante la
+-- transición; cuando todos los recursos tengan category_id se podran dropear.
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK(type IN ('report','document')),
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    parent_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(type, code),
+    FOREIGN KEY (parent_id) REFERENCES categories (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type, is_active);
+CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);

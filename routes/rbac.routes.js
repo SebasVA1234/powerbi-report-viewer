@@ -50,4 +50,14 @@ router.get('/acl/resource/:type/:id',
 router.get('/acl/principal/:type/:id',
     authMiddleware, requirePermission('permissions.manage'), RbacController.listAclsForPrincipal);
 
+// PR-1c: Categorías de reportes y documentos.
+//   GET /categories?type=report|document&include_archived=0|1   listar
+//   POST /categories                                            crear (categories.manage)
+//   PUT /categories/:id                                         editar
+//   POST /categories/:id/archive                                soft-delete
+router.get('/categories',                authMiddleware,                                       RbacController.listCategories);
+router.post('/categories',               authMiddleware, requirePermission('categories.manage'), RbacController.createCategory);
+router.put('/categories/:id',            authMiddleware, requirePermission('categories.manage'), RbacController.updateCategory);
+router.post('/categories/:id/archive',   authMiddleware, requirePermission('categories.manage'), RbacController.archiveCategory);
+
 module.exports = router;

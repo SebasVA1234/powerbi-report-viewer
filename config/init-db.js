@@ -44,6 +44,96 @@ async function migrateAccessLogsDocCol() {
     }
 }
 
+// PR-1c: agrega reports.category_id y documents.category_id (FK a categories).
+// Migra los strings existentes de reports.category / documents.category a
+// filas en categories. Idempotente: detecta el estado y aplica solo lo que falta.
+//
+// Estrategia:
+//   1. Si reports.category_id no existe, la crea (nullable).
+//   2. Para cada distinct reports.category (string no-vacio) que NO tenga
+//      una categoría correspondiente en categories(type='report'), la crea
+//      y popula reports.category_id. Idem para documents.
+//   3. La columna string queda intacta para no romper código que la lea.
+//      Se puede dropear más adelante (en una PR futura) cuando confirmemos
+//      que nadie la usa.
+async function migrateCategoriesFK() {
+    const isPg = db.driver === 'postgres';
+
+    // Helper: detectar columnas presentes en una tabla.
+    async function tableCols(table) {
+        if (isPg) {
+            const r = await db.query(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+                [table]
+            );
+            return r.map(c => c.column_name);
+        }
+        const r = await db.query(`PRAGMA table_info(${table})`);
+        return r.map(c => c.name);
+    }
+
+    // Helper: snake_case del nombre de la categoría para el code.
+    function toCode(name) {
+        return (name || '')
+            .toString()
+            .toLowerCase()
+            .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+            .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n')
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 31) || 'sin_categoria';
+    }
+
+    for (const [table, type] of [['reports', 'report'], ['documents', 'document']]) {
+        const cols = await tableCols(table);
+        const fkCol = 'category_id';
+        const stringCol = 'category';
+
+        // 1. Crear category_id si falta.
+        if (!cols.includes(fkCol)) {
+            await db.exec(`ALTER TABLE ${table} ADD COLUMN ${fkCol} INTEGER`);
+            console.log(`🔧 Migración: columna ${fkCol} añadida a ${table}`);
+        }
+
+        // 2. Si no hay columna 'category' string, no hay nada que migrar.
+        if (!cols.includes(stringCol)) continue;
+
+        // 3. Buscar reports/documents con category string pero sin category_id.
+        const pending = await db.query(`
+            SELECT DISTINCT ${stringCol} AS cat_name
+            FROM ${table}
+            WHERE ${stringCol} IS NOT NULL AND ${stringCol} <> ''
+              AND ${fkCol} IS NULL
+        `);
+        if (pending.length === 0) continue;
+
+        for (const row of pending) {
+            const name = row.cat_name;
+            const code = toCode(name);
+
+            // Crear categoría si no existe.
+            const onConflictCat = isPg
+                ? `INSERT INTO categories (type, code, name) VALUES (?, ?, ?)
+                   ON CONFLICT(type, code) DO NOTHING`
+                : `INSERT OR IGNORE INTO categories (type, code, name) VALUES (?, ?, ?)`;
+            await db.execute(onConflictCat, [type, code, name]);
+
+            // Popular FK en todas las filas que matchean por string.
+            const cat = await db.queryOne(
+                'SELECT id FROM categories WHERE type = ? AND code = ?',
+                [type, code]
+            );
+            if (cat) {
+                await db.execute(
+                    `UPDATE ${table} SET ${fkCol} = ? WHERE ${stringCol} = ? AND ${fkCol} IS NULL`,
+                    [cat.id, name]
+                );
+            }
+        }
+        console.log(`🔧 Migración: ${pending.length} categoría(s) string migradas a categories(type='${type}')`);
+    }
+}
+
 // PR-0b.1: agrega users.totp_secret y users.totp_enabled (2FA TOTP).
 // Idempotente: detecta el estado y aplica solo lo que falta.
 async function migrateUsersTotpFields() {
@@ -417,6 +507,10 @@ async function init() {
     // PR-1a: semilla RBAC. Corre después de seedUsers para poder asignar
     // admin_sistema al user admin (id=1).
     await seedRbac();
+    // PR-1c: la migración de categories corre DESPUÉS del seed para
+    // capturar las categorías string sembradas (DB virgen) y también
+    // las preexistentes en una DB legacy que ya tenía reports/docs.
+    await migrateCategoriesFK();
     console.log('✅ Base de datos inicializada correctamente');
     console.log('👤 Usuario admin: admin / admin123');
     console.log('👤 Usuario test: usuario1 / user123');

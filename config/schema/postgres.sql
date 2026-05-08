@@ -264,3 +264,23 @@ CREATE TABLE IF NOT EXISTS resource_acl (
 
 CREATE INDEX IF NOT EXISTS idx_acl_resource ON resource_acl(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_acl_principal ON resource_acl(principal_type, principal_id);
+
+-- ============================================================
+-- PR-1c: CATEGORIES (ver sqlite.sql para descripción)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    type TEXT NOT NULL CHECK(type IN ('report','document')),
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    parent_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(type, code),
+    FOREIGN KEY (parent_id) REFERENCES categories (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type, is_active);
+CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);

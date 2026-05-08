@@ -43,6 +43,21 @@ async function buildVisibilityFilter(resourceType, userContext, userId, tableAli
     const deptPlaceholders = deptIds.length > 0 ? deptIds.map(() => '?').join(',') : '0';
     const rolePlaceholders = roleIds.length > 0 ? roleIds.map(() => '?').join(',') : '0';
 
+    // Sub-query: ids de categorías 'report' o 'document' a las que el user
+    // tiene acceso vía ACL (directo, depto o rol). Si la categoría está en
+    // resource_acl como resource_type='category' y el user/depto/rol matchea,
+    // todos los recursos de esa categoría son visibles. PR-1c.
+    const categoryAccessSubquery = `
+        SELECT DISTINCT a.resource_id AS cat_id
+        FROM resource_acl a
+        WHERE a.resource_type = 'category'
+          AND (
+            (a.principal_type = 'user' AND a.principal_id = ?)
+            ${deptIds.length > 0 ? `OR (a.principal_type = 'department' AND a.principal_id IN (${deptPlaceholders}))` : ''}
+            ${roleIds.length > 0 ? `OR (a.principal_type = 'role' AND a.principal_id IN (${rolePlaceholders}))` : ''}
+          )
+    `;
+
     const whereClause = `
         (
           -- Legacy: user_report_permissions / user_document_permissions
@@ -72,15 +87,23 @@ async function buildVisibilityFilter(resourceType, userContext, userId, tableAli
             SELECT 1 FROM resource_acl
             WHERE resource_type = '${resourceType}' AND resource_id = ${aliasId}
               AND principal_type = 'role' AND principal_id IN (${rolePlaceholders})
-          )` : '0=1'}
+          )
+          OR` : ''}
+          -- PR-1c: heredada por la CATEGORÍA del recurso. Si el recurso
+          -- tiene category_id y el user (directo/dept/role) tiene ACL a
+          -- esa categoría, queda visible.
+          ${tableAlias}.category_id IS NOT NULL AND ${tableAlias}.category_id IN (${categoryAccessSubquery})
         )
     `;
 
     const params = [
         userId,                     // legacy
-        userId,                     // acl user
+        userId,                     // acl user directo
         ...(deptIds.length > 0 ? deptIds : []),  // acl department
-        ...(roleIds.length > 0 ? roleIds : [])   // acl role
+        ...(roleIds.length > 0 ? roleIds : []),  // acl role
+        userId,                     // category sub-query: principal user
+        ...(deptIds.length > 0 ? deptIds : []),  // category sub-query: deptos
+        ...(roleIds.length > 0 ? roleIds : [])   // category sub-query: roles
     ];
 
     return { whereClause, params };
@@ -139,6 +162,38 @@ async function canUserAccessResource(userId, resourceType, resourceId, action = 
             [resourceType, resourceId, ...ctx.roles.map(r => r.id)]
         );
         if (byRole.some(row => aclGrantsAction(row.actions, action))) return true;
+    }
+
+    // PR-1c: ACL heredada por la CATEGORÍA del recurso.
+    if (resourceType === 'report' || resourceType === 'document') {
+        const table = resourceType === 'report' ? 'reports' : 'documents';
+        let resourceRow;
+        try {
+            resourceRow = await db.queryOne(
+                `SELECT category_id FROM ${table} WHERE id = ?`,
+                [resourceId]
+            );
+        } catch {
+            // Columna category_id puede no existir si la migración aún no corrió.
+            resourceRow = null;
+        }
+        if (resourceRow && resourceRow.category_id) {
+            const principals = [
+                { type: 'user', id: userId }
+            ];
+            for (const d of ctx.departments) principals.push({ type: 'department', id: d.id });
+            for (const r of ctx.roles)       principals.push({ type: 'role',       id: r.id });
+
+            for (const p of principals) {
+                const row = await db.queryOne(
+                    `SELECT actions FROM resource_acl
+                     WHERE resource_type = 'category' AND resource_id = ?
+                       AND principal_type = ? AND principal_id = ?`,
+                    [resourceRow.category_id, p.type, p.id]
+                );
+                if (row && aclGrantsAction(row.actions, action)) return true;
+            }
+        }
     }
 
     return false;
