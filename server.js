@@ -1,13 +1,16 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 require('dotenv').config();
 
-// Validar JWT_SECRET en producción
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-    console.error('❌ ERROR: JWT_SECRET no está configurado en producción');
+// Validar JWT_SECRET — debe existir, tener ≥32 chars y no ser el default
+const JWT_DEFAULT = 'tu_secreto_super_seguro_aqui';
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_DEFAULT || process.env.JWT_SECRET.length < 32) {
+    console.error('❌ ERROR: JWT_SECRET inválido. Debe tener ≥32 caracteres y no ser el valor default.');
+    console.error('   Generar uno seguro: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
     process.exit(1);
 }
 
@@ -31,39 +34,40 @@ const PORT = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
 // =============================================
-// SEGURIDAD - Headers HTTP
+// SEGURIDAD - Headers HTTP via helmet
 // =============================================
-app.use((req, res, next) => {
-    // Prevenir clickjacking
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    // Prevenir sniffing de MIME type
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    // XSS Protection
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    // Referrer Policy
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    // Content Security Policy
-    //  - frame-ancestors 'self'   -> impide que nuestra app sea embebida en sitios ajenos
-    //  - worker-src blob:         -> PDF.js necesita levantar un Web Worker desde blob:
-    //  - frame-src / child-src    -> iframes permitidos: Power BI + Fabric
-    //                                 (child-src es fallback para navegadores viejos)
-    const powerbiFrames = [
-        "https://app.powerbi.com",
-        "https://app.fabric.microsoft.com",
-        "https://*.powerbi.com",
-        "https://*.fabric.microsoft.com"
-    ].join(' ');
-    res.setHeader(
-        'Content-Security-Policy',
-        [
-            "frame-ancestors 'self'",
-            "worker-src 'self' blob:",
-            `frame-src 'self' ${powerbiFrames}`,
-            `child-src 'self' blob: ${powerbiFrames}`
-        ].join('; ')
-    );
-    next();
-});
+//  - frame-ancestors 'self'   -> impide que nuestra app sea embebida en sitios ajenos
+//  - worker-src blob:         -> PDF.js necesita levantar un Web Worker desde blob:
+//  - frame-src / child-src    -> iframes permitidos: Power BI + Fabric
+//  - script/style 'unsafe-inline' se mantiene temporalmente: el HTML actual usa
+//    handlers onclick="..." inline. Se endurece en Fase 2 (refactor frontend).
+//  - HSTS habilitado: navegadores deben usar HTTPS para los próximos 12 meses.
+const powerbiFrames = [
+    "https://app.powerbi.com",
+    "https://app.fabric.microsoft.com",
+    "https://*.powerbi.com",
+    "https://*.fabric.microsoft.com"
+];
+app.use(helmet({
+    contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'font-src': ["'self'", "data:"],
+            'img-src': ["'self'", "data:", "https:"],
+            'connect-src': ["'self'"],
+            'frame-ancestors': ["'self'"],
+            'worker-src': ["'self'", "blob:"],
+            'frame-src': ["'self'", ...powerbiFrames],
+            'child-src': ["'self'", "blob:", ...powerbiFrames]
+        }
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+}));
 
 // Rate limiting (Seguridad contra ataques de fuerza bruta)
 const limiter = rateLimit({
@@ -87,14 +91,22 @@ const loginLimiter = rateLimit({
     }
 });
 
-// Configuración de CORS
+// Configuración de CORS — whitelist explícita por env var
+// ALLOWED_ORIGINS=* (legacy) o ALLOWED_ORIGINS=https://a.com,https://b.com
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 const corsOptions = {
-    origin: process.env.ALLOWED_ORIGINS === '*' 
-        ? '*' 
-        : process.env.ALLOWED_ORIGINS?.split(',') || '*',
+    origin: allowedOrigins.length === 0 || allowedOrigins.includes('*')
+        ? '*'
+        : allowedOrigins,
     credentials: true,
     optionsSuccessStatus: 200
 };
+if (isProduction && (allowedOrigins.length === 0 || allowedOrigins.includes('*'))) {
+    console.warn('⚠️  ALLOWED_ORIGINS está vacío o "*" en producción. Recomendado: setear la(s) URL(s) exactas.');
+}
 
 // Middlewares Globales
 app.use(cors(corsOptions));
@@ -127,6 +139,13 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/cotizador', cotizadorRoutes);
 app.use('/api/_admin', adminRoutes);
 app.use('/api/rbac', rbacRoutes);
+
+// 404 JSON para cualquier ruta /api/* no matcheada por las routes de arriba.
+// Antes el catch-all SPA agarraba estas rutas y devolvía index.html con 200,
+// confundiendo a clientes API y enmascarando endpoints inexistentes.
+app.use('/api', (req, res) => {
+    res.status(404).json({ success: false, message: 'Endpoint no encontrado' });
+});
 
 // Ruta para cualquier otra petición (SPA - Single Page Application)
 // Esto hace que si refrescas la página en /dashboard, no de error 404

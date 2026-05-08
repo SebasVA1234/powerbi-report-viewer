@@ -1,5 +1,22 @@
 const db = require('../config/db');
 
+// Valida que embed_url sea https y apunte a un host de Power BI o Fabric.
+// Reemplaza el viejo includes('powerbi.com'), bypasseable con
+// https://atacante.com/?powerbi.com=x
+function isValidPowerBIUrl(url) {
+    try {
+        const u = new URL(url);
+        if (u.protocol !== 'https:') return false;
+        const h = u.hostname;
+        return h === 'app.powerbi.com'
+            || h === 'app.fabric.microsoft.com'
+            || h.endsWith('.powerbi.com')
+            || h.endsWith('.fabric.microsoft.com');
+    } catch {
+        return false;
+    }
+}
+
 class ReportController {
     // Obtener reportes disponibles para el usuario actual
     static async getMyReports(req, res) {
@@ -181,10 +198,10 @@ class ReportController {
                     message: 'Nombre y URL de inserción son requeridos'
                 });
             }
-            if (!embed_url.includes('powerbi.com')) {
+            if (!isValidPowerBIUrl(embed_url)) {
                 return res.status(400).json({
                     success: false,
-                    message: 'La URL debe ser una URL válida de Power BI'
+                    message: 'La URL debe ser HTTPS y apuntar a un host de Power BI o Fabric'
                 });
             }
 
@@ -230,6 +247,13 @@ class ReportController {
             const report = await db.queryOne('SELECT id FROM reports WHERE id = ?', [id]);
             if (!report) {
                 return res.status(404).json({ success: false, message: 'Reporte no encontrado' });
+            }
+
+            if (embed_url !== undefined && !isValidPowerBIUrl(embed_url)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'La URL debe ser HTTPS y apuntar a un host de Power BI o Fabric'
+                });
             }
 
             const updates = [];
