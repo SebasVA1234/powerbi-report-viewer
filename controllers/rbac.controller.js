@@ -50,11 +50,25 @@ async function getUserContext(userId, req = null) {
     `, [userId]);
     const permissions = new Set(permRows.map(r => r.code));
 
+    // Hotfix: respetar el rol legacy users.role='admin'. Antes de PR-1a,
+    // ese era el único mecanismo de admin del sistema. Users con
+    // users.role='admin' que no tienen el rol RBAC admin_sistema
+    // asignado deben seguir teniendo acceso completo (mismo comportamiento
+    // que tenían antes del merge), hasta que el admin del nuevo modelo
+    // les asigne explícitamente un rol RBAC.
+    const userRow = await db.queryOne(
+        'SELECT role FROM users WHERE id = ?',
+        [userId]
+    );
+    const isLegacyAdmin = !!(userRow && userRow.role === 'admin');
+
     const ctx = {
         roles,
         departments,
         permissions,
-        isAdmin: permissions.has('system.admin') || roles.some(r => r.code === 'admin_sistema')
+        isAdmin: permissions.has('system.admin')
+              || roles.some(r => r.code === 'admin_sistema')
+              || isLegacyAdmin
     };
     if (req) req[`_userContext_${userId}`] = ctx;
     return ctx;
