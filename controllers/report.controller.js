@@ -1,15 +1,23 @@
 const db = require('../config/db');
+const { getUserContext } = require('./rbac.controller');
+const { buildVisibilityFilter, canUserAccessResource } = require('./permission_resolver');
 
 class ReportController {
-    // Obtener reportes disponibles para el usuario actual
+    // Obtener reportes disponibles para el usuario actual.
+    // PR-1b: visibilidad considera (en orden):
+    //   1. Permiso 'reports.read.all' o admin → todos los reportes activos.
+    //   2. user_report_permissions (legacy) → preservado.
+    //   3. resource_acl (nuevo) → asignación a user / departamento / rol.
     static async getMyReports(req, res) {
         try {
             const userId = req.user.id;
-            const isAdmin = req.user.role === 'admin';
+            const ctx = await getUserContext(userId, req);
 
             let reports;
+            const filter = await buildVisibilityFilter('report', ctx, userId);
 
-            if (isAdmin) {
+            if (filter === null) {
+                // Ve todo (admin / reports.read.all)
                 reports = await db.query(`
                     SELECT
                         r.id, r.name, r.description, r.embed_url, r.category,
@@ -24,12 +32,11 @@ class ReportController {
                     SELECT
                         r.id, r.name, r.description, r.embed_url, r.category,
                         r.is_active, r.created_at,
-                        p.can_view, p.can_export, p.granted_at
+                        1 as can_view, 0 as can_export
                     FROM reports r
-                    INNER JOIN user_report_permissions p ON r.id = p.report_id
-                    WHERE p.user_id = ? AND r.is_active = 1 AND p.can_view = 1
+                    WHERE r.is_active = 1 AND ${filter.whereClause}
                     ORDER BY r.category, r.name
-                `, [userId]);
+                `, filter.params);
             }
 
             const groupedReports = reports.reduce((acc, report) => {
@@ -122,30 +129,30 @@ class ReportController {
         }
     }
 
-    // Obtener un reporte específico
+    // Obtener un reporte específico.
+    // PR-1b: la visibilidad pasa por canUserAccessResource (legacy + ACL nueva).
     static async getReportById(req, res) {
         try {
             const { id } = req.params;
             const userId = req.user.id;
             const isAdmin = req.user.role === 'admin';
 
-            let report;
-            if (isAdmin) {
-                report = await db.queryOne('SELECT * FROM reports WHERE id = ?', [id]);
-            } else {
-                report = await db.queryOne(`
-                    SELECT r.*, p.can_view, p.can_export
-                    FROM reports r
-                    INNER JOIN user_report_permissions p ON r.id = p.report_id
-                    WHERE r.id = ? AND p.user_id = ? AND p.can_view = 1
-                `, [id, userId]);
+            const report = await db.queryOne('SELECT * FROM reports WHERE id = ? AND is_active = 1', [id]);
+            if (!report) {
+                return res.status(404).json({ success: false, message: 'Reporte no encontrado' });
             }
 
-            if (!report) {
+            const canView = isAdmin || await canUserAccessResource(userId, 'report', Number(id), 'view');
+            if (!canView) {
                 return res.status(404).json({
                     success: false,
                     message: 'Reporte no encontrado o sin permisos'
                 });
+            }
+            // Para no-admins, can_export se calcula sobre la marcha.
+            if (!isAdmin) {
+                report.can_view = 1;
+                report.can_export = await canUserAccessResource(userId, 'report', Number(id), 'export') ? 1 : 0;
             }
 
             await db.execute(

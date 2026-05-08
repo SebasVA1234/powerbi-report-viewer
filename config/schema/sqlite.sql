@@ -259,3 +259,29 @@ CREATE INDEX IF NOT EXISTS idx_role_perms_role ON role_permissions(role_id);
 CREATE INDEX IF NOT EXISTS idx_user_depts_user ON user_departments(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_depts_dept ON user_departments(department_id);
 CREATE INDEX IF NOT EXISTS idx_departments_active ON departments(is_active);
+
+-- ============================================================
+-- PR-1b: RESOURCE ACL — asignación de recursos a principales
+-- ============================================================
+-- Reemplaza progresivamente a user_report_permissions / user_document_permissions:
+--   principal_type='user'        => fila por user específico
+--   principal_type='department'  => todo el depto hereda
+--   principal_type='role'        => todos los users con ese rol heredan
+-- Las viejas tablas legacy SIGUEN funcionando en paralelo durante la transición.
+-- La migración de datos legacy → resource_acl llega en una PR futura (PR-1e).
+CREATE TABLE IF NOT EXISTS resource_acl (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_type TEXT NOT NULL CHECK(resource_type IN ('report','document','category')),
+    resource_id INTEGER NOT NULL,
+    principal_type TEXT NOT NULL CHECK(principal_type IN ('user','department','role')),
+    principal_id INTEGER NOT NULL,
+    -- JSON array: ['view'], ['view','export']. Default ['view'] al crear.
+    actions TEXT NOT NULL DEFAULT '["view"]',
+    granted_by INTEGER,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(resource_type, resource_id, principal_type, principal_id),
+    FOREIGN KEY (granted_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_acl_resource ON resource_acl(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_acl_principal ON resource_acl(principal_type, principal_id);
