@@ -282,7 +282,10 @@ async function seedRbac() {
         ['hr.positions.manage','hr',         'positions.manage', 'CRUD de perfiles de cargo'],
         // PR-3b: feriados y banco de días compensados
         ['hr.holidays.manage', 'hr',         'holidays.manage',  'CRUD de feriados (RRHH)'],
-        ['hr.attendance.manage','hr',        'attendance.manage','Registrar asistencia a feriados (RRHH)']
+        ['hr.attendance.manage','hr',        'attendance.manage','Registrar asistencia a feriados (RRHH)'],
+        // PR-3c: solicitudes de tiempo libre
+        ['hr.timeoff.request', 'hr',         'timeoff.request',  'Solicitar días libres (cualquier empleado)'],
+        ['hr.timeoff.approve', 'hr',         'timeoff.approve',  'Aprobar/rechazar solicitudes (jefe / RRHH)']
     ];
     for (const [code, resource_type, action, description] of PERMS) {
         await db.execute(
@@ -356,18 +359,23 @@ async function seedRbac() {
         'reports.read.assigned', 'documents.read.assigned',
         'audit.read',
         'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage',
-        'hr.holidays.manage', 'hr.attendance.manage'  // PR-3b
+        'hr.holidays.manage', 'hr.attendance.manage',  // PR-3b
+        'hr.timeoff.approve'                            // PR-3c
     ]);
 
-    // PR-3a: jefes ven a su equipo en RRHH.
+    // PR-3a: jefes ven a su equipo en RRHH. PR-3c: aprueban time-off de su equipo.
     for (const j of ['jefe_compras','jefe_ventas','jefe_contabilidad','jefe_marketing']) {
-        await grantPermsToRole(j, ['hr.read.team', 'hr.read.own']);
+        await grantPermsToRole(j, [
+            'hr.read.team', 'hr.read.own',
+            'hr.timeoff.request', 'hr.timeoff.approve'
+        ]);
     }
 
-    // Empleado: lo mínimo + ver su propio perfil RRHH.
+    // Empleado: lo mínimo + ver su propio perfil RRHH + solicitar días libres.
     await grantPermsToRole('empleado', [
         'reports.read.assigned', 'documents.read.assigned',
-        'hr.read.own'
+        'hr.read.own',
+        'hr.timeoff.request'
     ]);
 
     // -------- Asignar admin del sistema al user admin (id=1) --------

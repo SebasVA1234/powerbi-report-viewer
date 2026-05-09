@@ -381,3 +381,32 @@ CREATE TABLE IF NOT EXISTS holiday_attendance (
 CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
 CREATE INDEX IF NOT EXISTS idx_holiday_attendance_emp ON holiday_attendance(employee_id);
 CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holiday_id);
+
+-- ============================================================
+-- PR-3c: SOLICITUDES DE TIEMPO LIBRE (ver sqlite.sql)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS time_off_requests (
+    id SERIAL PRIMARY KEY,
+    employee_id INTEGER NOT NULL,
+    request_type TEXT NOT NULL CHECK(request_type IN
+        ('vacaciones','feriado_compensado','permiso_personal','enfermedad','otro')),
+    date_from DATE NOT NULL,
+    date_to DATE NOT NULL,
+    days_count NUMERIC(5,2) NOT NULL,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected','cancelled')),
+    requested_by INTEGER,
+    approved_by INTEGER,
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users (id),
+    FOREIGN KEY (approved_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
+CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);

@@ -429,3 +429,39 @@ CREATE TABLE IF NOT EXISTS holiday_attendance (
 CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
 CREATE INDEX IF NOT EXISTS idx_holiday_attendance_emp ON holiday_attendance(employee_id);
 CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holiday_id);
+
+-- ============================================================
+-- PR-3c: SOLICITUDES DE TIEMPO LIBRE (vacaciones, permisos, etc.)
+-- ============================================================
+-- Cierra el ciclo del banco de días compensados (PR-3b):
+--   * Empleado solicita días libres con un tipo (vacaciones,
+--     feriado_compensado, permiso_personal, enfermedad).
+--   * Si tipo='feriado_compensado', al APROBARSE descuenta del banco.
+--   * Aprobación pendiente: jefe directo (o RRHH/Gerencia).
+-- Workflow: pending → approved | rejected | cancelled.
+-- approved_by registra quién lo aprobó (auditoría).
+CREATE TABLE IF NOT EXISTS time_off_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    request_type TEXT NOT NULL CHECK(request_type IN
+        ('vacaciones','feriado_compensado','permiso_personal','enfermedad','otro')),
+    date_from DATE NOT NULL,
+    date_to DATE NOT NULL,
+    days_count REAL NOT NULL,         -- días calendario solicitados
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected','cancelled')),
+    requested_by INTEGER,             -- user_id de quien lo creó (puede ser admin/rrhh por el empleado)
+    approved_by INTEGER,
+    approved_at DATETIME,
+    rejection_reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users (id),
+    FOREIGN KEY (approved_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
+CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
+CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);
