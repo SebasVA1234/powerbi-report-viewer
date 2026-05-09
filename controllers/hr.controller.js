@@ -479,10 +479,14 @@ class HrController {
                 WHERE employee_id = ?
             `, [id]);
 
-            // PR-3c agregará el debe de time_off_requests aprobados.
+            // PR-3c: descontar solicitudes aprobadas de tipo 'feriado_compensado'.
             const usedRow = await db.queryOne(`
-                SELECT 0 AS total
-            `);  // placeholder hasta PR-3c
+                SELECT COALESCE(SUM(days_count), 0) AS total
+                FROM time_off_requests
+                WHERE employee_id = ?
+                  AND request_type = 'feriado_compensado'
+                  AND status = 'approved'
+            `, [id]);
             const used = Number(usedRow.total || 0);
             const accrued = Number(credit.total || 0);
 
@@ -492,13 +496,243 @@ class HrController {
                     employee_id: Number(id),
                     days_accrued: accrued,
                     days_used: used,
-                    balance: accrued - used,
-                    note: 'days_used se contabilizará desde PR-3c (vacaciones / time_off_requests)'
+                    balance: accrued - used
                 }
             });
         } catch (err) {
             console.error('getCompensatedBalance:', err);
             res.status(500).json({ success: false, message: 'Error al obtener saldo' });
+        }
+    }
+
+    // ============================================================
+    // PR-3c: Solicitudes de tiempo libre (vacaciones, permisos, etc.)
+    // ============================================================
+    // Workflow: pending → approved | rejected | cancelled.
+    // Si tipo='feriado_compensado' y se aprueba, getCompensatedBalance lo
+    // descuenta del banco automáticamente (no se modifica el banco como
+    // tabla separada — se calcula on-the-fly).
+
+    // Listar solicitudes. Visibilidad mismo modelo que listEmployees:
+    //   - hr.read.all → todas
+    //   - hr.read.team → de su equipo (jefe / depto donde es head)
+    //   - hr.read.own → solo las propias
+    static async listTimeOffRequests(req, res) {
+        try {
+            const visibleIds = await getVisibleEmployeeIds(req.user.id);
+
+            const conditions = [];
+            const params = [];
+
+            if (visibleIds !== null) {
+                if (visibleIds.length === 0) {
+                    return res.json({ success: true, data: { requests: [], total: 0 } });
+                }
+                conditions.push(`r.employee_id IN (${visibleIds.map(() => '?').join(',')})`);
+                params.push(...visibleIds);
+            }
+            if (req.query.status) {
+                conditions.push('r.status = ?');
+                params.push(req.query.status);
+            }
+            if (req.query.request_type) {
+                conditions.push('r.request_type = ?');
+                params.push(req.query.request_type);
+            }
+            const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+            const rows = await db.query(`
+                SELECT r.id, r.employee_id, r.request_type, r.date_from, r.date_to,
+                       r.days_count, r.reason, r.status,
+                       r.requested_by, r.approved_by, r.approved_at,
+                       r.rejection_reason, r.created_at,
+                       e.full_name AS employee_name,
+                       d.name AS department_name,
+                       ub.username AS approved_by_username
+                FROM time_off_requests r
+                JOIN hr_employees e ON e.id = r.employee_id
+                LEFT JOIN departments d ON d.id = e.department_id
+                LEFT JOIN users ub ON ub.id = r.approved_by
+                ${where}
+                ORDER BY r.created_at DESC
+            `, params);
+            res.json({ success: true, data: { requests: rows, total: rows.length } });
+        } catch (err) {
+            console.error('listTimeOffRequests:', err);
+            res.status(500).json({ success: false, message: 'Error al listar solicitudes' });
+        }
+    }
+
+    // Crear solicitud. Empleado pide para sí mismo; RRHH/Gerencia pueden
+    // crear en nombre de cualquier empleado.
+    static async createTimeOffRequest(req, res) {
+        try {
+            const { employee_id, request_type, date_from, date_to, days_count, reason } = req.body;
+            if (!request_type || !date_from || !date_to || !days_count) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'request_type, date_from, date_to y days_count son requeridos'
+                });
+            }
+            const validTypes = ['vacaciones','feriado_compensado','permiso_personal','enfermedad','otro'];
+            if (!validTypes.includes(request_type)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `request_type inválido. Válidos: ${validTypes.join(', ')}`
+                });
+            }
+            if (date_from > date_to) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'date_from no puede ser posterior a date_to'
+                });
+            }
+
+            // Resolver el employee_id objetivo.
+            let targetEmpId = employee_id;
+            const ctx = await getUserContext(req.user.id, req);
+            const canCreateForOthers = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+
+            if (!targetEmpId) {
+                // Sin employee_id explícito: solicitar para sí mismo.
+                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+                if (!me) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'No tienes perfil de empleado. Pedí a RRHH que te lo cree.'
+                    });
+                }
+                targetEmpId = me.id;
+            } else if (!canCreateForOthers) {
+                // Tiene employee_id explícito pero no es admin/RRHH: solo puede ser él mismo.
+                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+                if (!me || me.id !== Number(targetEmpId)) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Solo podés solicitar días libres para vos mismo.'
+                    });
+                }
+            }
+
+            // Si tipo='feriado_compensado', validar saldo (no permite ir a negativo).
+            if (request_type === 'feriado_compensado') {
+                const credit = await db.queryOne(
+                    'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
+                    [targetEmpId]
+                );
+                const usedApproved = await db.queryOne(`
+                    SELECT COALESCE(SUM(days_count), 0) AS total
+                    FROM time_off_requests
+                    WHERE employee_id = ?
+                      AND request_type = 'feriado_compensado'
+                      AND status IN ('approved','pending')
+                `, [targetEmpId]);
+                const balance = Number(credit.total || 0) - Number(usedApproved.total || 0);
+                if (Number(days_count) > balance) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Saldo insuficiente. Disponible: ${balance} día(s), pediste ${days_count}.`
+                    });
+                }
+            }
+
+            const r = await db.execute(
+                `INSERT INTO time_off_requests
+                 (employee_id, request_type, date_from, date_to, days_count, reason, requested_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [targetEmpId, request_type, date_from, date_to, days_count, reason || null, req.user.id]
+            );
+            res.status(201).json({ success: true, data: { id: r.lastInsertId } });
+        } catch (err) {
+            console.error('createTimeOffRequest:', err);
+            res.status(500).json({ success: false, message: 'Error al crear solicitud' });
+        }
+    }
+
+    static async approveTimeOffRequest(req, res) {
+        try {
+            const { id } = req.params;
+            const r = await db.queryOne('SELECT id, status FROM time_off_requests WHERE id = ?', [id]);
+            if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+            if (r.status !== 'pending') {
+                return res.status(400).json({
+                    success: false,
+                    message: `La solicitud ya está en estado '${r.status}'`
+                });
+            }
+            await db.execute(
+                `UPDATE time_off_requests
+                 SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [req.user.id, id]
+            );
+            res.json({ success: true, message: 'Solicitud aprobada' });
+        } catch (err) {
+            console.error('approveTimeOffRequest:', err);
+            res.status(500).json({ success: false, message: 'Error al aprobar' });
+        }
+    }
+
+    static async rejectTimeOffRequest(req, res) {
+        try {
+            const { id } = req.params;
+            const { reason } = req.body || {};
+            const r = await db.queryOne('SELECT id, status FROM time_off_requests WHERE id = ?', [id]);
+            if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+            if (r.status !== 'pending') {
+                return res.status(400).json({
+                    success: false,
+                    message: `La solicitud ya está en estado '${r.status}'`
+                });
+            }
+            await db.execute(
+                `UPDATE time_off_requests
+                 SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                     rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [req.user.id, reason || null, id]
+            );
+            res.json({ success: true, message: 'Solicitud rechazada' });
+        } catch (err) {
+            console.error('rejectTimeOffRequest:', err);
+            res.status(500).json({ success: false, message: 'Error al rechazar' });
+        }
+    }
+
+    // El propio solicitante puede cancelar su solicitud si está pending.
+    static async cancelTimeOffRequest(req, res) {
+        try {
+            const { id } = req.params;
+            const r = await db.queryOne(`
+                SELECT r.id, r.status, e.user_id AS owner_user_id
+                FROM time_off_requests r
+                JOIN hr_employees e ON e.id = r.employee_id
+                WHERE r.id = ?
+            `, [id]);
+            if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+            if (r.status !== 'pending') {
+                return res.status(400).json({
+                    success: false,
+                    message: `La solicitud ya está en estado '${r.status}'`
+                });
+            }
+            const ctx = await getUserContext(req.user.id, req);
+            const isOwner = r.owner_user_id === req.user.id;
+            const canManage = ctx.isAdmin || ctx.permissions.has('hr.timeoff.approve');
+            if (!isOwner && !canManage) {
+                return res.status(403).json({ success: false, message: 'Sin permisos para cancelar esta solicitud' });
+            }
+            await db.execute(
+                `UPDATE time_off_requests
+                 SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [id]
+            );
+            res.json({ success: true, message: 'Solicitud cancelada' });
+        } catch (err) {
+            console.error('cancelTimeOffRequest:', err);
+            res.status(500).json({ success: false, message: 'Error al cancelar' });
         }
     }
 

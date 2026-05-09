@@ -47,4 +47,16 @@ router.delete('/attendance/:attendanceId',
 // Saldo del banco de días compensados por empleado.
 router.get('/employees/:id/compensated-balance', authMiddleware, HrController.getCompensatedBalance);
 
+// PR-3c: Solicitudes de tiempo libre (vacaciones / permisos / feriado compensado).
+//   - listar / crear: cualquier user logueado (la visibilidad la filtra el controller).
+//   - aprobar / rechazar: requiere hr.timeoff.approve (jefes y RRHH).
+//   - cancelar: el dueño de la solicitud O quien tenga hr.timeoff.approve.
+router.get('/time-off',                  authMiddleware, HrController.listTimeOffRequests);
+router.post('/time-off',                 authMiddleware, HrController.createTimeOffRequest);
+router.post('/time-off/:id/approve',
+    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.approveTimeOffRequest);
+router.post('/time-off/:id/reject',
+    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.rejectTimeOffRequest);
+router.post('/time-off/:id/cancel',       authMiddleware, HrController.cancelTimeOffRequest);
+
 module.exports = router;
