@@ -276,27 +276,59 @@ const API = {
         });
     },
 
-    // ========= Cotizador Landed Cost =========
-    async cotizadorListDestinos() {
-        return this.request('/cotizador/destinos');
-    },
-    async cotizadorListCargueras() {
-        return this.request('/cotizador/cargueras');
-    },
+    // ========= Cotizador Landed Cost · v2 =========
+    // Catálogos (lectura — cualquier user con cotizador.use)
+    async cotizadorListAirports()    { return this.request('/cotizador/airports'); },
+    async cotizadorListAerolineas()  { return this.request('/cotizador/aerolineas'); },
+    async cotizadorListCargueras()   { return this.request('/cotizador/cargueras'); },
+    async cotizadorListTarifas()     { return this.request('/cotizador/tarifas'); },
+    async cotizadorListTarifasPais() { return this.request('/cotizador/tarifas-pais'); },
+    // Backwards-compat: la UI vieja llamaba a Destinos. Lo aliasamos a airports.
+    async cotizadorListDestinos()    { return this.request('/cotizador/airports'); },
+
+    // Cálculo y guardado (cotizador.use)
     async cotizadorCalcular(payload) {
         return this.request('/cotizador/cotizar', {
-            method: 'POST',
-            body: JSON.stringify(payload)
+            method: 'POST', body: JSON.stringify(payload)
         });
     },
     async cotizadorGuardar(payload) {
         return this.request('/cotizador/cotizaciones', {
-            method: 'POST',
-            body: JSON.stringify(payload)
+            method: 'POST', body: JSON.stringify(payload)
         });
     },
     async cotizadorHistorico(limit = 20) {
         return this.request(`/cotizador/cotizaciones?limit=${limit}`);
+    },
+
+    // CRUD tarifas (cotizador.tarifas.manage)
+    async cotizadorCreateTarifa(payload) {
+        return this.request('/cotizador/tarifas', { method: 'POST', body: JSON.stringify(payload) });
+    },
+    async cotizadorUpdateTarifa(id, payload) {
+        return this.request(`/cotizador/tarifas/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    },
+    async cotizadorDeleteTarifa(id) {
+        return this.request(`/cotizador/tarifas/${id}`, { method: 'DELETE' });
+    },
+    async cotizadorUpsertTarifaPais(payload) {
+        return this.request('/cotizador/tarifas-pais', { method: 'POST', body: JSON.stringify(payload) });
+    },
+
+    // CRUD catálogos
+    async cotizadorCreateAirport(p)    { return this.request('/cotizador/airports',    { method: 'POST',  body: JSON.stringify(p) }); },
+    async cotizadorUpdateAirport(id,p) { return this.request(`/cotizador/airports/${id}`, { method: 'PUT', body: JSON.stringify(p) }); },
+    async cotizadorDeleteAirport(id)   { return this.request(`/cotizador/airports/${id}`, { method: 'DELETE' }); },
+    async cotizadorCreateAerolinea(p)    { return this.request('/cotizador/aerolineas', { method: 'POST',  body: JSON.stringify(p) }); },
+    async cotizadorUpdateAerolinea(id,p) { return this.request(`/cotizador/aerolineas/${id}`, { method: 'PUT', body: JSON.stringify(p) }); },
+    async cotizadorDeleteAerolinea(id)   { return this.request(`/cotizador/aerolineas/${id}`, { method: 'DELETE' }); },
+    async cotizadorCreateCarguera(p)    { return this.request('/cotizador/cargueras', { method: 'POST',  body: JSON.stringify(p) }); },
+    async cotizadorUpdateCarguera(id,p) { return this.request(`/cotizador/cargueras/${id}`, { method: 'PUT', body: JSON.stringify(p) }); },
+    async cotizadorDeleteCarguera(id)   { return this.request(`/cotizador/cargueras/${id}`, { method: 'DELETE' }); },
+
+    // Audit log
+    async cotizadorAuditLog(limit = 100) {
+        return this.request(`/cotizador/audit-log?limit=${limit}`);
     }
 };
 

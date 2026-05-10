@@ -1320,3 +1320,151 @@ input[type="file"]::file-selector-button:hover {
     color: var(--text-1) !important;
     border: 1px solid rgba(255, 255, 255, 0.15) !important;
 }
+
+/* ============================================================
+   COTIZADOR v2 · Toggle Calcular/Configurar + pricing-row
+   ============================================================ */
+
+/* Toggle "Calcular | Configurar tarifas" arriba a la derecha */
+.cotizador-mode-toggle {
+    display: inline-flex;
+    gap: 0.4rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    padding: 4px;
+    border-radius: var(--radius-pill);
+}
+.cot-mode-btn {
+    padding: 0.5rem 1.1rem;
+    background: transparent;
+    color: var(--text-2);
+    border: none;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all var(--transition-fast);
+}
+.cot-mode-btn:hover {
+    color: var(--text-1);
+    background: rgba(255, 255, 255, 0.04);
+}
+.cot-mode-btn.active {
+    background: var(--gradient-brand);
+    color: white;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+/* Panes del toggle: solo se muestra el activo */
+.cot-mode-pane { display: none; }
+.cot-mode-pane.active { display: block; animation: fade-in 200ms ease; }
+
+/* Pricing row (estilo antigravity): cada tarifa o país es una fila glass */
+.pricing-row {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+    transition: border-color var(--transition-fast);
+    flex-wrap: wrap;
+}
+.pricing-row:hover { border-color: var(--border-strong); }
+
+.pricing-flight-info {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    min-width: 280px;
+    flex: 1;
+}
+.airline-badge {
+    width: 40px; height: 40px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: white;
+    background: var(--gradient-brand);
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
+}
+.pricing-route {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text-1);
+    letter-spacing: -0.01em;
+}
+.pricing-flight-num {
+    font-size: 0.78rem;
+    color: var(--text-3);
+    margin-top: 2px;
+}
+
+.pricing-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.rate-input-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0.4rem 0.65rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    color: var(--text-1);
+    transition: border-color var(--transition-fast);
+}
+.rate-input-wrapper:focus-within { border-color: var(--primary); }
+.rate-input-wrapper > span {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.78rem;
+}
+.rate-input,
+.pais-input {
+    width: 70px;
+    background: none !important;
+    border: none !important;
+    color: var(--text-1) !important;
+    font-size: 0.88rem;
+    font-weight: 700;
+    outline: none;
+    padding: 0 !important;
+    text-align: right;
+}
+
+.btn-save-rate {
+    padding: 0.45rem 0.9rem;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: var(--radius-sm);
+    color: var(--accent-light);
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.btn-save-rate:hover {
+    background: rgba(16, 185, 129, 0.25);
+    color: white;
+    border-color: var(--accent);
+}
+
+/* Tip in cot-meta-grid: agregar columna "Ruta" extra */
+.cot-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+    gap: 0.6rem;
+}

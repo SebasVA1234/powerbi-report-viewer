@@ -6,6 +6,8 @@
  * - PR-0c: subir un PDF chico, listar, ver via streamDocument (chequear bytes)
  * - PR-3d: emitir memo a "all", listar inbox, verificar hash, acusar
  * - hotfix: crear empleado dummy → DELETE /api/hr/employees/:id → confirmar 404
+ * - cotizador v2: catálogos seedeados, costo país USA upsert, calc UIO→MIA,
+ *   audit log registra cambios
  *
  * Run: node scripts/smoke-prototype.js
  */
@@ -179,6 +181,47 @@ function assert(cond, msg) {
     assert(r.status === 200 && r.body.success, 'deleteDocument OK');
     const filesAfter = fs.readdirSync(docsDir);
     assert(filesAfter.length === files.length - 1, 'archivo desapareció del volumen tras delete');
+
+    // 16. Cotizador v2: verificar que los catálogos están sembrados.
+    r = await req('GET', '/api/cotizador/airports', { token });
+    assert(r.status === 200 && r.body.success && r.body.data.length >= 35, `airports >=35 (got ${r.body.data?.length})`);
+    r = await req('GET', '/api/cotizador/aerolineas', { token });
+    assert(r.status === 200 && r.body.data.length >= 12, `aerolineas >=12 (got ${r.body.data?.length})`);
+    r = await req('GET', '/api/cotizador/cargueras', { token });
+    assert(r.status === 200 && r.body.data.length >= 5, `cargueras >=5 (got ${r.body.data?.length})`);
+    r = await req('GET', '/api/cotizador/tarifas-pais', { token });
+    assert(r.status === 200 && r.body.data.length >= 10, `paises >=10 (got ${r.body.data?.length})`);
+
+    // 17. Upsert costo de país USA (idempotente).
+    r = await req('POST', '/api/cotizador/tarifas-pais', {
+        token, body: { country_code: 'US', country_name: 'USA', aduana_fija: 240, transporte_interno_caja: 15 }
+    });
+    assert(r.status === 200 || r.status === 201, 'upsert tarifa-pais USA OK');
+
+    // 18. Calcular cotización UIO→MIA con tarifa demo.
+    const airports = (await req('GET', '/api/cotizador/airports', { token })).body.data;
+    const cargueras = (await req('GET', '/api/cotizador/cargueras', { token })).body.data;
+    const aerolineas = (await req('GET', '/api/cotizador/aerolineas', { token })).body.data;
+    const uio = airports.find(a => a.iata_code === 'UIO');
+    const mia = airports.find(a => a.iata_code === 'MIA');
+    const saftec = cargueras.find(c => c.nombre.startsWith('Saftec'));
+    const avianca = aerolineas.find(a => a.codigo_iata === 'AV');
+    r = await req('POST', '/api/cotizador/cotizar', {
+        token, body: {
+            cantidad_tallos: 10000, tallos_por_caja: 250,
+            precio_tallo_escenario_1: 0.95, precio_tallo_escenario_2: 0.65,
+            carguera_id: saftec.id, aerolinea_id: avianca.id,
+            origen_airport_id: uio.id, destino_airport_id: mia.id,
+            fecha_proyeccion: '2026-05-10'
+        }
+    });
+    assert(r.status === 200 && r.body.success, 'cotizar UIO→MIA OK');
+    assert(r.body.data.metadata.tarifa_flete_aplicada === 3.5, 'tarifa $3.50/kg aplicada');
+    assert(r.body.data.escenarios.escenario_1.landed_cost_por_tallo > 0, 'E1 landed_cost calculado');
+
+    // 19. Audit log registró el upsert.
+    r = await req('GET', '/api/cotizador/audit-log', { token });
+    assert(r.status === 200 && r.body.data.length >= 1, 'audit log tiene entradas');
 
     console.log('\n✅ TODOS los smoke tests pasaron.');
 })().catch(err => { console.error('❌ smoke crash:', err); process.exit(1); });

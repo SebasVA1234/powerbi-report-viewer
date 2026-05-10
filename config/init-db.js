@@ -304,6 +304,7 @@ async function seedRbac() {
         ['documents.read.assigned','documents','read.assigned','Ver documentos asignados'],
         ['documents.write',    'documents',  'write', 'Subir, eliminar documentos'],
         ['cotizador.use',      'cotizador',  'use',   'Usar el cotizador y guardar histórico propio'],
+        ['cotizador.tarifas.manage', 'cotizador', 'tarifas.manage', 'Configurar tarifas, costos por país y catálogos del cotizador'],
         ['permissions.manage', 'permissions','manage','Asignar/quitar permisos a otros usuarios'],
         ['audit.read',         'audit',      'read',  'Ver logs de acceso'],
         // PR-3a: permisos RRHH
@@ -502,61 +503,208 @@ async function seedSamplePermission() {
     } catch (e) { /* tolerante */ }
 }
 
-async function seedCotizador() {
-    // Destino: Miami (MIA)
-    await db.execute(
-        insertOrIgnore('destinos',
-            ['codigo_iata', 'nombre', 'pais', 'porcentaje_arancel', 'porcentaje_impuesto_consumo'],
-            'codigo_iata'),
-        ['MIA', 'Miami', 'USA', 0, 0]
-    );
-    // Carguera: Copa Airlines
-    await db.execute(
-        insertOrIgnore('cargueras', ['nombre'], 'nombre'),
-        ['Copa Airlines']
-    );
+// PR-finalize-prototype · Migración del cotizador v1 → v2.
+// Schema viejo: destinos / cargueras (solo nombre) / tarifas_carguera (sin
+// aerolinea, sin origen) / tarifas_destino (key por destino, no país).
+// Schema nuevo: airports / aerolineas / cargueras (con pais, email) /
+// tarifas_carguera (con aerolinea, origen, destino, tariff_type, currency,
+// validity, surcharges) / tarifas_pais (por country_code) / tariff_changes_log.
+//
+// La migración detecta el schema viejo (existe tabla 'destinos' o columna
+// 'id_destino' en tarifas_carguera) y hace DROP TABLE de las viejas. Las
+// nuevas las crea loadSchema(). El seed siguiente (seedCatalogos) las
+// puebla. Como el seed viejo era solo Copa+MIA (datos de demo), no hay
+// pérdida real de datos productivos.
+async function migrateCotizadorV2() {
+    const isPg = db.driver === 'postgres';
 
-    const dest = await db.queryOne('SELECT id FROM destinos WHERE codigo_iata = ?', ['MIA']);
-    const carg = await db.queryOne('SELECT id FROM cargueras WHERE nombre = ?', ['Copa Airlines']);
-
-    // Tarifas de Copa Airlines a Miami (vigentes desde 2024-01-01)
-    const existing = await db.queryOne(
-        'SELECT COUNT(*) as c FROM tarifas_carguera WHERE id_carguera = ? AND id_destino = ?',
-        [carg.id, dest.id]
-    );
-    if (Number(existing.c) === 0) {
-        // Tarifa para < 100 kg
-        await db.execute(
-            `INSERT INTO tarifas_carguera
-             (id_carguera, id_destino, peso_minimo, peso_maximo, tarifa_kilo,
-              costo_cuarto_frio_kilo, costo_documentacion_fijo, fecha_inicio, fecha_fin)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [carg.id, dest.id, 0, 99.99, 3.50, 0, 120, '2024-01-01', null]
+    async function tableExists(name) {
+        if (isPg) {
+            const r = await db.queryOne(
+                "SELECT 1 FROM information_schema.tables WHERE table_name = ?",
+                [name]
+            );
+            return !!r;
+        }
+        const r = await db.queryOne(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            [name]
         );
-        // Tarifa para >= 100 kg
-        await db.execute(
-            `INSERT INTO tarifas_carguera
-             (id_carguera, id_destino, peso_minimo, peso_maximo, tarifa_kilo,
-              costo_cuarto_frio_kilo, costo_documentacion_fijo, fecha_inicio, fecha_fin)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [carg.id, dest.id, 100, 999999, 2.405, 0, 120, '2024-01-01', null]
-        );
-        console.log('💸 Tarifas de Copa Airlines a Miami sembradas');
+        return !!r;
     }
 
-    const tdest = await db.queryOne(
-        'SELECT COUNT(*) as c FROM tarifas_destino WHERE id_destino = ?',
-        [dest.id]
-    );
-    if (Number(tdest.c) === 0) {
-        const rubros = JSON.stringify({});
+    async function columnExists(table, column) {
+        if (!(await tableExists(table))) return false;
+        if (isPg) {
+            const r = await db.queryOne(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
+                [table, column]
+            );
+            return !!r;
+        }
+        const cols = await db.query(`PRAGMA table_info(${table})`);
+        return cols.some(c => c.name === column);
+    }
+
+    // Schema viejo: tarifas_carguera tiene id_destino (no destino_airport_id).
+    const hasOldTarifa = await columnExists('tarifas_carguera', 'id_destino');
+    const hasOldDestinos = await tableExists('destinos');
+    const hasOldTarifaDestino = await tableExists('tarifas_destino');
+
+    if (hasOldTarifa || hasOldDestinos || hasOldTarifaDestino) {
+        console.log('🔄 Migración cotizador v1 → v2: dropeando tablas viejas');
+        // Drop in reverse dependency order.
+        try { await db.exec('DROP TABLE IF EXISTS tarifas_destino'); } catch {}
+        try { await db.exec('DROP TABLE IF EXISTS tarifas_carguera'); } catch {}
+        try { await db.exec('DROP TABLE IF EXISTS destinos'); } catch {}
+        // 'cargueras' viejas (solo nombre) también se dropean — el schema
+        // nuevo las recrea con columnas adicionales (pais, email, contacto).
+        try { await db.exec('DROP TABLE IF EXISTS cargueras'); } catch {}
+        // Re-aplicar el schema completo para que cree las nuevas tablas.
+        const file = isPg ? 'postgres.sql' : 'sqlite.sql';
+        const sql = fs.readFileSync(path.join(SCHEMA_DIR, file), 'utf8');
+        await db.exec(sql);
+        console.log('🔄 Cotizador v2: tablas nuevas creadas (airports, aerolineas, cargueras, tarifas_carguera, tarifas_pais, tariff_changes_log)');
+    }
+}
+
+// Seed catálogos del cotizador v2: aeropuertos típicos para flores
+// ecuatorianas, aerolíneas cargo principales, las 5 cargueras reales que
+// nos pasó el usuario, y costos por país placeholder para los 10 destinos
+// más relevantes. Idempotente — solo inserta si no existe.
+async function seedCotizador() {
+    // ---- Aeropuertos (35 — orígenes Ecuador + destinos top flores) ----
+    const AIRPORTS = [
+        // Origen Ecuador
+        ['UIO', 'Mariscal Sucre',           'Quito',         'Ecuador',     'EC'],
+        ['GYE', 'José Joaquín de Olmedo',   'Guayaquil',     'Ecuador',     'EC'],
+        // USA
+        ['MIA', 'Miami International',      'Miami',         'USA',         'US'],
+        ['MCO', 'Orlando International',    'Orlando',       'USA',         'US'],
+        ['JFK', 'John F. Kennedy Intl.',    'New York',      'USA',         'US'],
+        ['LAX', 'Los Angeles Intl.',        'Los Angeles',   'USA',         'US'],
+        ['ORD', "O'Hare International",     'Chicago',       'USA',         'US'],
+        ['IAH', 'George Bush Intl.',        'Houston',       'USA',         'US'],
+        ['ATL', 'Hartsfield-Jackson',       'Atlanta',       'USA',         'US'],
+        ['DFW', 'Dallas/Fort Worth Intl.',  'Dallas',        'USA',         'US'],
+        // Europa
+        ['AMS', 'Schiphol',                 'Amsterdam',     'Países Bajos','NL'],
+        ['FRA', 'Frankfurt am Main',        'Frankfurt',     'Alemania',    'DE'],
+        ['CDG', 'Charles de Gaulle',        'París',         'Francia',     'FR'],
+        ['MAD', 'Adolfo Suárez Madrid',     'Madrid',        'España',      'ES'],
+        ['MXP', 'Malpensa',                 'Milán',         'Italia',      'IT'],
+        ['LGG', 'Liège',                    'Lieja',         'Bélgica',     'BE'],
+        ['LHR', 'Heathrow',                 'Londres',       'Reino Unido', 'GB'],
+        ['ZRH', 'Zürich',                   'Zúrich',        'Suiza',       'CH'],
+        ['VIE', 'Schwechat',                'Viena',         'Austria',     'AT'],
+        // Canadá
+        ['YYZ', 'Pearson',                  'Toronto',       'Canadá',      'CA'],
+        ['YVR', 'Vancouver Intl.',          'Vancouver',     'Canadá',      'CA'],
+        // Rusia
+        ['SVO', 'Sheremetyevo',             'Moscú',         'Rusia',       'RU'],
+        ['DME', 'Domodedovo',               'Moscú',         'Rusia',       'RU'],
+        // Medio Oriente
+        ['DXB', 'Dubai International',      'Dubai',         'Emiratos',    'AE'],
+        ['DOH', 'Hamad International',      'Doha',          'Catar',       'QA'],
+        // Asia
+        ['NRT', 'Narita',                   'Tokio',         'Japón',       'JP'],
+        ['HND', 'Haneda',                   'Tokio',         'Japón',       'JP'],
+        ['PVG', 'Pudong',                   'Shanghái',      'China',       'CN'],
+        ['HKG', 'Hong Kong Intl.',          'Hong Kong',     'Hong Kong',   'HK'],
+        ['ICN', 'Incheon',                  'Seúl',          'Corea del Sur','KR'],
+        // LATAM
+        ['BOG', 'El Dorado',                'Bogotá',        'Colombia',    'CO'],
+        ['LIM', 'Jorge Chávez',             'Lima',          'Perú',        'PE'],
+        ['PTY', 'Tocumen',                  'Panamá',        'Panamá',      'PA'],
+        ['MEX', 'Benito Juárez',            'CDMX',          'México',      'MX'],
+        ['GRU', 'Guarulhos',                'São Paulo',     'Brasil',      'BR']
+    ];
+    for (const [iata, name, city, country, cc] of AIRPORTS) {
         await db.execute(
-            `INSERT INTO tarifas_destino
-             (id_destino, aduana_fija, transporte_interno_caja, rubros_dinamicos, fecha_inicio, fecha_fin)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [dest.id, 240, 15, rubros, '2024-01-01', null]
+            insertOrIgnore('airports', ['iata_code','name','city','country','country_code'], 'iata_code'),
+            [iata, name, city, country, cc]
         );
-        console.log('💸 Tarifa de destino MIA sembrada');
+    }
+    console.log(`✈️  Cotizador: ${AIRPORTS.length} aeropuertos sembrados`);
+
+    // ---- Aerolíneas cargo (12 principales) ----
+    const AEROLINEAS = [
+        ['Avianca Cargo',           'AV', 'CO'],
+        ['LATAM Cargo',             'LA', 'CL'],
+        ['KLM Cargo',               'KL', 'NL'],
+        ['Lufthansa Cargo',         'LH', 'DE'],
+        ['Air France Cargo',        'AF', 'FR'],
+        ['American Airlines Cargo', 'AA', 'US'],
+        ['Iberia Cargo',            'IB', 'ES'],
+        ['Centurion Air Cargo',     'WE', 'US'],
+        ['Cargolux',                'CV', 'LU'],
+        ['Atlas Air',               '5Y', 'US'],
+        ['Qatar Airways Cargo',     'QR', 'QA'],
+        ['Emirates SkyCargo',       'EK', 'AE']
+    ];
+    for (const [nombre, iata, pais] of AEROLINEAS) {
+        await db.execute(
+            insertOrIgnore('aerolineas', ['nombre','codigo_iata','codigo_pais'], 'codigo_iata'),
+            [nombre, iata, pais]
+        );
+    }
+    console.log(`🛫 Cotizador: ${AEROLINEAS.length} aerolíneas sembradas`);
+
+    // ---- Cargueras (5 reales del listado del usuario) ----
+    const CARGUERAS = [
+        ['Saftec S.A.',              'Ecuador',  'sales@saftec.com.ec'],
+        ['Ebf Cargo Cía Ltda',       'Ecuador',  'ebf@ebfcargo.com'],
+        ['Logiztik Alliance Group',  'Ecuador',  'sales3@logiztikalliance.com'],
+        ['One Team Cargo S.A.',      'Ecuador',  'administracion@oneteamcargo.com'],
+        ['Kuehne + Nagel S.A.',      'Kenya',    'nbo.fa@kuehne-nagel.com']
+    ];
+    for (const [nombre, pais, email] of CARGUERAS) {
+        await db.execute(
+            insertOrIgnore('cargueras', ['nombre','pais','email'], 'nombre'),
+            [nombre, pais, email]
+        );
+    }
+    console.log(`🚚 Cotizador: ${CARGUERAS.length} cargueras sembradas`);
+
+    // ---- Tarifas por país (placeholder en cero — admin las edita
+    // desde el módulo "Configurar tarifas") ----
+    const PAISES = [
+        ['US','USA'], ['NL','Países Bajos'], ['DE','Alemania'], ['ES','España'],
+        ['FR','Francia'], ['GB','Reino Unido'], ['IT','Italia'], ['RU','Rusia'],
+        ['CA','Canadá'], ['JP','Japón']
+    ];
+    for (const [code, name] of PAISES) {
+        await db.execute(
+            insertOrIgnore('tarifas_pais',
+                ['country_code','country_name','aduana_fija','transporte_interno_caja',
+                 'porcentaje_arancel','porcentaje_impuesto_consumo'],
+                'country_code'),
+            [code, name, 0, 0, 0, 0]
+        );
+    }
+    console.log(`🌎 Cotizador: ${PAISES.length} países con costos placeholder sembrados (admin debe completar)`);
+
+    // ---- Tarifa demo (Saftec via Avianca UIO→MIA) — solo si no existe
+    // ninguna tarifa todavía; sirve para que el cotizador tenga algo
+    // que mostrar al primer arranque. ----
+    const anyTarifa = await db.queryOne('SELECT COUNT(*) as c FROM tarifas_carguera');
+    if (Number(anyTarifa.c) === 0) {
+        const carg = await db.queryOne('SELECT id FROM cargueras WHERE nombre = ?', ['Saftec S.A.']);
+        const aero = await db.queryOne('SELECT id FROM aerolineas WHERE codigo_iata = ?', ['AV']);
+        const orig = await db.queryOne('SELECT id FROM airports WHERE iata_code = ?', ['UIO']);
+        const dest = await db.queryOne('SELECT id FROM airports WHERE iata_code = ?', ['MIA']);
+        if (carg && aero && orig && dest) {
+            await db.execute(
+                `INSERT INTO tarifas_carguera
+                 (carguera_id, aerolinea_id, origen_airport_id, destino_airport_id,
+                  peso_minimo, peso_maximo, tarifa_kilo, costo_cuarto_frio_kilo,
+                  costo_documentacion_fijo, tariff_type, notas)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [carg.id, aero.id, orig.id, dest.id,
+                 0, 999999, 3.50, 0.20, 120, 'contract', 'Tarifa demo · editar desde el módulo']
+            );
+            console.log('💸 Cotizador: tarifa demo Saftec/Avianca UIO→MIA sembrada');
+        }
     }
 }
 
@@ -622,6 +770,7 @@ async function init() {
     await migrateUsersAuthFields();
     await migrateUsersTotpFields();
     await migrateDocumentsStorageKey();
+    await migrateCotizadorV2();
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();

@@ -97,55 +97,118 @@ CREATE TABLE IF NOT EXISTS system_config (
 );
 
 -- ============================================================
--- COTIZADOR LANDED COST (SCD Tipo 2)
+-- COTIZADOR LANDED COST · v2 (refactor PR-finalize-prototype)
 -- ============================================================
+-- Cambios vs v1:
+--   - 'destinos' renombrado a 'airports' con campos city/country/country_code
+--   - 'cargueras' refactor: agrega pais y email
+--   - NUEVO: 'aerolineas' (separadas de cargueras — antes estaban mezcladas)
+--   - 'tarifas_carguera' refactor: ahora cada fila es por
+--     (carguera + aerolinea + origen + destino + rango_peso). Sin SCD2:
+--     UPDATE en su lugar cuando cambia. Histórico se ve via tariff_changes_log.
+--   - 'tarifas_destino' renombrado a 'tarifas_pais' y key por country_code
+--     (los costos de aduana son nacionales, no por aeropuerto).
+--   - NUEVO: 'tariff_changes_log' (append-only audit, antes/después JSON).
+--   - 'cotizaciones_historico' SIN cambios — el usuario quiere preservarlas.
+-- La migración en init-db detecta el schema viejo y lo reemplaza
+-- (no hay datos productivos relevantes, solo el seed de Copa+MIA).
 
-CREATE TABLE IF NOT EXISTS destinos (
+CREATE TABLE IF NOT EXISTS airports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo_iata TEXT NOT NULL UNIQUE,
-    nombre TEXT NOT NULL,
-    pais TEXT,
-    porcentaje_arancel REAL DEFAULT 0,
-    porcentaje_impuesto_consumo REAL DEFAULT 0,
+    iata_code TEXT NOT NULL UNIQUE,    -- "MIA"
+    name TEXT NOT NULL,                 -- "Miami International Airport"
+    city TEXT NOT NULL,                 -- "Miami"
+    country TEXT NOT NULL,              -- "USA"
+    country_code TEXT NOT NULL,         -- "US" (ISO alpha-2) — agrupa tarifas_pais
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS aerolineas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,                -- "Avianca Cargo"
+    codigo_iata TEXT UNIQUE,             -- "AV" (2 chars)
+    codigo_pais TEXT,                    -- "CO" ISO alpha-2 (donde radica)
     is_active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS cargueras (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL UNIQUE,
+    nombre TEXT NOT NULL UNIQUE,         -- "Saftec S.A."
+    pais TEXT,                            -- "Ecuador"
+    email TEXT,                           -- "sales@saftec.com.ec"
+    contacto TEXT,                        -- persona/teléfono opcional
     is_active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- SCD Tipo 2: el rango fecha_inicio..fecha_fin define vigencia.
--- fecha_fin NULL = tarifa actualmente vigente (la abierta).
+-- Tarifas de flete: 1 fila por (carguera + aerolinea + origen + destino + rango_peso + tariff_type).
+-- UNIQUE compuesto evita duplicados; UPDATE en su lugar cuando admin cambia
+-- valores. La auditoría de cambios queda en tariff_changes_log.
 CREATE TABLE IF NOT EXISTS tarifas_carguera (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_carguera INTEGER NOT NULL,
-    id_destino INTEGER NOT NULL,
-    peso_minimo REAL NOT NULL,
-    peso_maximo REAL NOT NULL,
+    carguera_id INTEGER NOT NULL,
+    aerolinea_id INTEGER NOT NULL,
+    origen_airport_id INTEGER NOT NULL,
+    destino_airport_id INTEGER NOT NULL,
+    peso_minimo REAL NOT NULL DEFAULT 0,
+    peso_maximo REAL NOT NULL DEFAULT 999999,
     tarifa_kilo REAL NOT NULL,
     costo_cuarto_frio_kilo REAL DEFAULT 0,
     costo_documentacion_fijo REAL DEFAULT 0,
-    fecha_inicio DATE NOT NULL,
-    fecha_fin DATE,
+    tariff_type TEXT NOT NULL DEFAULT 'contract'
+        CHECK(tariff_type IN ('contract','spot','promo')),
+    currency TEXT NOT NULL DEFAULT 'USD',
+    validity_from DATE,                   -- NULL = sin restricción de inicio
+    validity_to DATE,                     -- NULL = sin vencimiento
+    surcharges_json TEXT,                 -- JSON: [{nombre, monto, tipo:fijo|por_kg}]
+    notas TEXT,
+    is_active INTEGER DEFAULT 1,
+    updated_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_carguera) REFERENCES cargueras (id),
-    FOREIGN KEY (id_destino) REFERENCES destinos (id)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(carguera_id, aerolinea_id, origen_airport_id, destino_airport_id,
+           peso_minimo, peso_maximo, tariff_type),
+    FOREIGN KEY (carguera_id) REFERENCES cargueras (id) ON DELETE CASCADE,
+    FOREIGN KEY (aerolinea_id) REFERENCES aerolineas (id) ON DELETE CASCADE,
+    FOREIGN KEY (origen_airport_id) REFERENCES airports (id),
+    FOREIGN KEY (destino_airport_id) REFERENCES airports (id),
+    FOREIGN KEY (updated_by) REFERENCES users (id)
 );
 
-CREATE TABLE IF NOT EXISTS tarifas_destino (
+-- Costos por país de destino (aduana, transporte interno, impuestos).
+-- Key por country_code (ISO alpha-2) — todos los aeropuertos de USA
+-- comparten el mismo costo de aduana. UPDATE en su lugar.
+CREATE TABLE IF NOT EXISTS tarifas_pais (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_destino INTEGER NOT NULL,
+    country_code TEXT NOT NULL UNIQUE,    -- "US"
+    country_name TEXT NOT NULL,           -- "USA" / "Estados Unidos"
     aduana_fija REAL DEFAULT 0,
     transporte_interno_caja REAL DEFAULT 0,
-    rubros_dinamicos TEXT,            -- JSON serializado (SQLite no tiene JSONB)
-    fecha_inicio DATE NOT NULL,
-    fecha_fin DATE,
+    porcentaje_arancel REAL DEFAULT 0,
+    porcentaje_impuesto_consumo REAL DEFAULT 0,
+    rubros_dinamicos TEXT,                -- JSON: [{nombre, monto, tipo}]
+    notas TEXT,
+    is_active INTEGER DEFAULT 1,
+    updated_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_destino) REFERENCES destinos (id)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES users (id)
+);
+
+-- Audit log append-only: cada cambio en tarifas o catálogos deja huella.
+-- Permite ver "quién cambió qué" sin necesidad de versionar SCD2.
+CREATE TABLE IF NOT EXISTS tariff_changes_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,             -- 'tarifas_carguera' | 'tarifas_pais' | 'airports' | 'aerolineas' | 'cargueras'
+    record_id INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('CREATE','UPDATE','DELETE')),
+    before_json TEXT,                     -- estado previo (NULL si CREATE)
+    after_json TEXT,                      -- estado nuevo  (NULL si DELETE)
+    changed_by INTEGER,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (changed_by) REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS cotizaciones_historico (
@@ -167,8 +230,11 @@ CREATE INDEX IF NOT EXISTS idx_doc_permissions_doc ON user_document_permissions(
 CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
 CREATE INDEX IF NOT EXISTS idx_logs_user ON access_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON access_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_tarifa_carg_vigente ON tarifas_carguera(id_carguera, id_destino, fecha_inicio, fecha_fin);
-CREATE INDEX IF NOT EXISTS idx_tarifa_dest_vigente ON tarifas_destino(id_destino, fecha_inicio, fecha_fin);
+CREATE INDEX IF NOT EXISTS idx_tarifa_carg_lookup ON tarifas_carguera(carguera_id, aerolinea_id, origen_airport_id, destino_airport_id);
+CREATE INDEX IF NOT EXISTS idx_tarifa_pais_lookup ON tarifas_pais(country_code);
+CREATE INDEX IF NOT EXISTS idx_airports_country ON airports(country_code, is_active);
+CREATE INDEX IF NOT EXISTS idx_tariff_log_record ON tariff_changes_log(table_name, record_id);
+CREATE INDEX IF NOT EXISTS idx_tariff_log_user ON tariff_changes_log(changed_by, changed_at);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_user ON cotizaciones_historico(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_name_unique ON reports(name);
 

@@ -100,16 +100,26 @@ CREATE TABLE IF NOT EXISTS system_config (
 );
 
 -- ============================================================
--- COTIZADOR LANDED COST (SCD Tipo 2)
+-- COTIZADOR LANDED COST · v2 (refactor PR-finalize-prototype)
+-- Ver sqlite.sql para descripción detallada del modelo.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS destinos (
+CREATE TABLE IF NOT EXISTS airports (
     id SERIAL PRIMARY KEY,
-    codigo_iata TEXT NOT NULL UNIQUE,
+    iata_code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    city TEXT NOT NULL,
+    country TEXT NOT NULL,
+    country_code TEXT NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS aerolineas (
+    id SERIAL PRIMARY KEY,
     nombre TEXT NOT NULL,
-    pais TEXT,
-    porcentaje_arancel NUMERIC(8,4) DEFAULT 0,
-    porcentaje_impuesto_consumo NUMERIC(8,4) DEFAULT 0,
+    codigo_iata TEXT UNIQUE,
+    codigo_pais TEXT,
     is_active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -117,36 +127,71 @@ CREATE TABLE IF NOT EXISTS destinos (
 CREATE TABLE IF NOT EXISTS cargueras (
     id SERIAL PRIMARY KEY,
     nombre TEXT NOT NULL UNIQUE,
+    pais TEXT,
+    email TEXT,
+    contacto TEXT,
     is_active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS tarifas_carguera (
     id SERIAL PRIMARY KEY,
-    id_carguera INTEGER NOT NULL,
-    id_destino INTEGER NOT NULL,
-    peso_minimo NUMERIC(10,2) NOT NULL,
-    peso_maximo NUMERIC(10,2) NOT NULL,
+    carguera_id INTEGER NOT NULL,
+    aerolinea_id INTEGER NOT NULL,
+    origen_airport_id INTEGER NOT NULL,
+    destino_airport_id INTEGER NOT NULL,
+    peso_minimo NUMERIC(10,2) NOT NULL DEFAULT 0,
+    peso_maximo NUMERIC(10,2) NOT NULL DEFAULT 999999,
     tarifa_kilo NUMERIC(10,4) NOT NULL,
     costo_cuarto_frio_kilo NUMERIC(10,4) DEFAULT 0,
     costo_documentacion_fijo NUMERIC(10,2) DEFAULT 0,
-    fecha_inicio DATE NOT NULL,
-    fecha_fin DATE,
+    tariff_type TEXT NOT NULL DEFAULT 'contract'
+        CHECK(tariff_type IN ('contract','spot','promo')),
+    currency TEXT NOT NULL DEFAULT 'USD',
+    validity_from DATE,
+    validity_to DATE,
+    surcharges_json JSONB,
+    notas TEXT,
+    is_active INTEGER DEFAULT 1,
+    updated_by INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_carguera) REFERENCES cargueras (id),
-    FOREIGN KEY (id_destino) REFERENCES destinos (id)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(carguera_id, aerolinea_id, origen_airport_id, destino_airport_id,
+           peso_minimo, peso_maximo, tariff_type),
+    FOREIGN KEY (carguera_id) REFERENCES cargueras (id) ON DELETE CASCADE,
+    FOREIGN KEY (aerolinea_id) REFERENCES aerolineas (id) ON DELETE CASCADE,
+    FOREIGN KEY (origen_airport_id) REFERENCES airports (id),
+    FOREIGN KEY (destino_airport_id) REFERENCES airports (id),
+    FOREIGN KEY (updated_by) REFERENCES users (id)
 );
 
-CREATE TABLE IF NOT EXISTS tarifas_destino (
+CREATE TABLE IF NOT EXISTS tarifas_pais (
     id SERIAL PRIMARY KEY,
-    id_destino INTEGER NOT NULL,
+    country_code TEXT NOT NULL UNIQUE,
+    country_name TEXT NOT NULL,
     aduana_fija NUMERIC(10,2) DEFAULT 0,
     transporte_interno_caja NUMERIC(10,2) DEFAULT 0,
+    porcentaje_arancel NUMERIC(8,4) DEFAULT 0,
+    porcentaje_impuesto_consumo NUMERIC(8,4) DEFAULT 0,
     rubros_dinamicos JSONB,
-    fecha_inicio DATE NOT NULL,
-    fecha_fin DATE,
+    notas TEXT,
+    is_active INTEGER DEFAULT 1,
+    updated_by INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_destino) REFERENCES destinos (id)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS tariff_changes_log (
+    id SERIAL PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    record_id INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('CREATE','UPDATE','DELETE')),
+    before_json JSONB,
+    after_json JSONB,
+    changed_by INTEGER,
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (changed_by) REFERENCES users (id)
 );
 
 CREATE TABLE IF NOT EXISTS cotizaciones_historico (
@@ -168,8 +213,11 @@ CREATE INDEX IF NOT EXISTS idx_doc_permissions_doc ON user_document_permissions(
 CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
 CREATE INDEX IF NOT EXISTS idx_logs_user ON access_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON access_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_tarifa_carg_vigente ON tarifas_carguera(id_carguera, id_destino, fecha_inicio, fecha_fin);
-CREATE INDEX IF NOT EXISTS idx_tarifa_dest_vigente ON tarifas_destino(id_destino, fecha_inicio, fecha_fin);
+CREATE INDEX IF NOT EXISTS idx_tarifa_carg_lookup ON tarifas_carguera(carguera_id, aerolinea_id, origen_airport_id, destino_airport_id);
+CREATE INDEX IF NOT EXISTS idx_tarifa_pais_lookup ON tarifas_pais(country_code);
+CREATE INDEX IF NOT EXISTS idx_airports_country ON airports(country_code, is_active);
+CREATE INDEX IF NOT EXISTS idx_tariff_log_record ON tariff_changes_log(table_name, record_id);
+CREATE INDEX IF NOT EXISTS idx_tariff_log_user ON tariff_changes_log(changed_by, changed_at);
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_user ON cotizaciones_historico(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_name_unique ON reports(name);
 

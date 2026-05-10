@@ -468,81 +468,171 @@
                             </div>
                         </section>
 
-                        <!-- Sección: Cotizador Landed Cost -->
+                        <!-- Sección: Cotizador Landed Cost · v2 -->
                         <section id="cotizador-section" class="content-section">
                             <div class="welcome-header">
                                 <div>
                                     <h1>Cotizador Landed Cost</h1>
                                     <p>Calcula el costo total de exportación de flores hasta destino. Compara dos escenarios de precio en simultáneo.</p>
                                 </div>
-                            </div>
-
-                            <div class="cotizador-grid">
-                                <!-- Formulario -->
-                                <form id="cotizador-form" class="cotizador-form card">
-                                    <h3>Datos del pedido</h3>
-
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="cot-tallos">Cantidad de tallos *</label>
-                                            <input type="number" id="cot-tallos" min="1" required value="10000">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cot-tallos-caja">Tallos por caja *</label>
-                                            <input type="number" id="cot-tallos-caja" min="1" required value="250">
-                                        </div>
-                                    </div>
-
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="cot-precio-1">Precio FOB tallo — Escenario 1 *</label>
-                                            <input type="number" id="cot-precio-1" min="0" step="0.01" required value="0.95">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cot-precio-2">Precio FOB tallo — Escenario 2 *</label>
-                                            <input type="number" id="cot-precio-2" min="0" step="0.01" required value="0.65">
-                                        </div>
-                                    </div>
-
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="cot-kilos">Kilos totales (opcional)</label>
-                                            <input type="number" id="cot-kilos" min="0" step="0.01" placeholder="Vacío = se usa 0.056 kg/tallo">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cot-fecha">Fecha de proyección *</label>
-                                            <input type="date" id="cot-fecha" required>
-                                        </div>
-                                    </div>
-
-                                    <div class="form-row">
-                                        <div class="form-group">
-                                            <label for="cot-carguera">Carguera *</label>
-                                            <select id="cot-carguera" required></select>
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cot-destino">Destino *</label>
-                                            <select id="cot-destino" required></select>
-                                        </div>
-                                    </div>
-
-                                    <div class="form-actions">
-                                        <button type="submit" class="btn btn-primary">Calcular</button>
-                                        <button type="button" class="btn btn-outline" id="cot-guardar-btn" disabled>Guardar cotización</button>
-                                    </div>
-                                </form>
-
-                                <!-- Resultado -->
-                                <div id="cotizador-resultado" class="cotizador-resultado"></div>
-                            </div>
-
-                            <!-- Histórico -->
-                            <div class="card cotizador-historico-wrap">
-                                <div class="reports-section-header">
-                                    <h3>Mis cotizaciones recientes</h3>
-                                    <button class="btn btn-outline" type="button" onclick="loadCotizacionesHistorico()">Actualizar</button>
+                                <div class="cotizador-mode-toggle" id="cotizador-mode-toggle">
+                                    <button class="cot-mode-btn active" data-mode="calcular">Calcular</button>
+                                    <button class="cot-mode-btn" data-mode="configurar" id="cot-mode-config-btn" style="display:none;">⚙️ Configurar tarifas</button>
                                 </div>
-                                <div id="cotizador-historico"></div>
+                            </div>
+
+                            <!-- Modo Calcular -->
+                            <div id="cot-mode-calcular" class="cot-mode-pane active">
+                                <div class="cotizador-grid">
+                                    <form id="cotizador-form" class="cotizador-form card">
+                                        <h3>Datos del pedido</h3>
+
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="cot-tallos">Cantidad de tallos *</label>
+                                                <input type="number" id="cot-tallos" min="1" required value="10000">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cot-tallos-caja">Tallos por caja *</label>
+                                                <input type="number" id="cot-tallos-caja" min="1" required value="250">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="cot-precio-1">Precio FOB tallo — Escenario 1 *</label>
+                                                <input type="number" id="cot-precio-1" min="0" step="0.01" required value="0.95">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cot-precio-2">Precio FOB tallo — Escenario 2 *</label>
+                                                <input type="number" id="cot-precio-2" min="0" step="0.01" required value="0.65">
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="cot-kilos">Kilos totales (opcional)</label>
+                                                <input type="number" id="cot-kilos" min="0" step="0.01" placeholder="Vacío = se usa 0.056 kg/tallo">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cot-fecha">Fecha de proyección *</label>
+                                                <input type="date" id="cot-fecha" required>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="cot-carguera">Carguera *</label>
+                                                <select id="cot-carguera" required></select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cot-aerolinea">Aerolínea *</label>
+                                                <select id="cot-aerolinea" required></select>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="cot-origen">Aeropuerto origen *</label>
+                                                <select id="cot-origen" required></select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cot-destino">Aeropuerto destino *</label>
+                                                <select id="cot-destino" required></select>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-actions">
+                                            <button type="submit" class="btn btn-primary">Calcular</button>
+                                            <button type="button" class="btn btn-outline" id="cot-guardar-btn" disabled>Guardar cotización</button>
+                                        </div>
+                                    </form>
+
+                                    <div id="cotizador-resultado" class="cotizador-resultado"></div>
+                                </div>
+
+                                <div class="card cotizador-historico-wrap">
+                                    <div class="reports-section-header">
+                                        <h3>Mis cotizaciones recientes</h3>
+                                        <button class="btn btn-outline" type="button" onclick="loadCotizacionesHistorico()">Actualizar</button>
+                                    </div>
+                                    <div id="cotizador-historico"></div>
+                                </div>
+                            </div>
+
+                            <!-- Modo Configurar tarifas (solo visible si user tiene cotizador.tarifas.manage) -->
+                            <div id="cot-mode-configurar" class="cot-mode-pane">
+                                <div class="admin-tabs" style="margin-bottom: 1rem;">
+                                    <button class="tab-btn active" data-tarifas-tab="tarifas">Tarifas de flete</button>
+                                    <button class="tab-btn" data-tarifas-tab="paises">Costos por país</button>
+                                    <button class="tab-btn" data-tarifas-tab="catalogos">Catálogos</button>
+                                    <button class="tab-btn" data-tarifas-tab="auditoria">Auditoría</button>
+                                </div>
+
+                                <!-- Tab: Tarifas de flete -->
+                                <div id="cot-tarifas-tab" class="tab-content active">
+                                    <div class="tab-header">
+                                        <h3>Tarifas vigentes</h3>
+                                        <button class="btn btn-primary" type="button" onclick="cotizadorAdmin.openCreateTarifa()">+ Nueva tarifa</button>
+                                    </div>
+                                    <p style="color:var(--text-2); font-size:0.85rem; margin-bottom:1rem;">
+                                        Cada fila es una combinación carguera + aerolínea + ruta + rango de peso. Editá los valores in-place y aplicá. Si no hay cambios, no se guarda nada.
+                                    </p>
+                                    <div id="cot-tarifas-list"><div class="loading">Cargando tarifas...</div></div>
+                                </div>
+
+                                <!-- Tab: Costos por país -->
+                                <div id="cot-paises-tab" class="tab-content">
+                                    <div class="tab-header">
+                                        <h3>Costos del país de destino</h3>
+                                    </div>
+                                    <p style="color:var(--text-2); font-size:0.85rem; margin-bottom:1rem;">
+                                        Aduana, transporte interno e impuestos por país. Estos valores se aplican a todos los aeropuertos del país.
+                                    </p>
+                                    <div id="cot-paises-list"><div class="loading">Cargando países...</div></div>
+                                </div>
+
+                                <!-- Tab: Catálogos -->
+                                <div id="cot-catalogos-tab" class="tab-content">
+                                    <div class="admin-tabs" style="margin-bottom:1rem;">
+                                        <button class="tab-btn active" data-cat-tab="airports">Aeropuertos</button>
+                                        <button class="tab-btn" data-cat-tab="aerolineas">Aerolíneas</button>
+                                        <button class="tab-btn" data-cat-tab="cargueras">Cargueras</button>
+                                    </div>
+                                    <div id="cot-cat-airports" class="tab-content active">
+                                        <div class="tab-header">
+                                            <h3>Aeropuertos</h3>
+                                            <button class="btn btn-primary" type="button" onclick="cotizadorAdmin.openCreateCatalog('airport')">+ Nuevo aeropuerto</button>
+                                        </div>
+                                        <div id="cot-airports-list"></div>
+                                    </div>
+                                    <div id="cot-cat-aerolineas" class="tab-content">
+                                        <div class="tab-header">
+                                            <h3>Aerolíneas</h3>
+                                            <button class="btn btn-primary" type="button" onclick="cotizadorAdmin.openCreateCatalog('aerolinea')">+ Nueva aerolínea</button>
+                                        </div>
+                                        <div id="cot-aerolineas-list"></div>
+                                    </div>
+                                    <div id="cot-cat-cargueras" class="tab-content">
+                                        <div class="tab-header">
+                                            <h3>Cargueras</h3>
+                                            <button class="btn btn-primary" type="button" onclick="cotizadorAdmin.openCreateCatalog('carguera')">+ Nueva carguera</button>
+                                        </div>
+                                        <div id="cot-cargueras-list"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Tab: Auditoría -->
+                                <div id="cot-auditoria-tab" class="tab-content">
+                                    <div class="tab-header">
+                                        <h3>Historial de cambios</h3>
+                                        <button class="btn btn-outline" type="button" onclick="cotizadorAdmin.loadAuditLog()">Actualizar</button>
+                                    </div>
+                                    <p style="color:var(--text-2); font-size:0.85rem; margin-bottom:1rem;">
+                                        Cada cambio en tarifas, países y catálogos queda registrado con quién, cuándo y qué valores cambiaron. Solo se loggea si los valores cambian (si no, no se guarda nada).
+                                    </p>
+                                    <div id="cot-audit-list"><div class="loading">Cargando...</div></div>
+                                </div>
                             </div>
                         </section>
 
@@ -1323,6 +1413,7 @@
     <script src="js/dashboard.js"></script>
     <script src="js/documents.js"></script>
     <script src="js/cotizador.js"></script>
+    <script src="js/cotizador-admin.js"></script>
     <script src="js/admin.js"></script>
     <script src="js/rbac-admin.js"></script>
     <script src="js/hr-admin.js"></script>
