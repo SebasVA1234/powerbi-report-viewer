@@ -18,12 +18,22 @@ async function initializeAdminSection() {
 }
 
 // Setup Admin Tabs
+// IMPORTANTE: scopeado a #admin-section. Antes este listener corría sobre
+// TODOS los .tab-btn de la página (incluyendo los sub-tabs del modal de
+// accesos y los tabs de RRHH) y al disparar el click borraba .active de
+// TODOS los .tab-content del documento. Por eso el modal abría con la
+// pestaña Usuarios "vacía".
 function setupAdminTabs() {
-    document.querySelectorAll('.tab-btn').forEach(tab => {
+    const adminSection = document.getElementById('admin-section');
+    if (!adminSection) return;
+    const adminTabBtns = adminSection.querySelectorAll(':scope > .admin-tabs > .tab-btn');
+    const adminTabContents = adminSection.querySelectorAll(':scope > .tab-content');
+
+    adminTabBtns.forEach(tab => {
         tab.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            
+            adminTabBtns.forEach(t => t.classList.remove('active'));
+            adminTabContents.forEach(c => c.classList.remove('active'));
+
             tab.classList.add('active');
             const tabContent = document.getElementById(`${tab.dataset.tab}-tab`);
             if (tabContent) {
@@ -208,9 +218,36 @@ async function togglePermission(userId, reportId, grant) {
 }
 
 // Modals Helpers
-function showCreateUserModal() {
+async function showCreateUserModal() {
     document.getElementById('create-user-modal').classList.add('active');
     document.getElementById('create-user-form').reset();
+    // Cargar departamentos y roles del catálogo RBAC para checkboxes inline.
+    // Si la carga falla (red, sin permisos), el modal sigue funcionando como
+    // antes — el admin podrá asignar después desde Permisos avanzados.
+    try {
+        const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+        const [deptsR, rolesR] = await Promise.all([
+            fetch('/api/rbac/departments', { headers }).then(r => r.json()),
+            fetch('/api/rbac/roles',        { headers }).then(r => r.json())
+        ]);
+        const depts = (deptsR.data && deptsR.data.departments) || [];
+        const roles = (rolesR.data && rolesR.data.roles) || [];
+
+        const renderChecks = (items, klass) => items.length === 0
+            ? '<em style="color:var(--text-3); font-size:0.85rem;">Sin elementos.</em>'
+            : items.map(it => `
+                <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.6rem; border-radius:6px; background:rgba(255,255,255,0.03); cursor:pointer;">
+                    <input type="checkbox" class="${klass}" value="${it.id}" data-code="${it.code || ''}">
+                    <span>${(it.name || '').replace(/</g,'&lt;')}</span>
+                </label>
+            `).join('');
+
+        document.getElementById('create-user-departments-checks').innerHTML = renderChecks(depts, 'create-user-dept-check');
+        document.getElementById('create-user-roles-checks').innerHTML       = renderChecks(roles, 'create-user-role-check');
+    } catch (err) {
+        document.getElementById('create-user-departments-checks').innerHTML = '<em style="color:var(--danger); font-size:0.85rem;">No se pudo cargar el catálogo: ' + (err.message || err) + '</em>';
+        document.getElementById('create-user-roles-checks').innerHTML       = '';
+    }
 }
 function showCreateReportModal() {
     document.getElementById('create-report-modal').classList.add('active');
@@ -223,18 +260,56 @@ function closeModal(modalId) {
 // Setup Admin Forms (Create & Edit)
 function setupAdminForms() {
     // Create User
+    // Después de crear el user, asigna los departamentos y roles RBAC seleccionados
+    // en el mismo modal. Cada asignación es una llamada separada (las APIs RBAC
+    // son granulares); si una falla, igual reportamos lo que SÍ se hizo.
     const createUserForm = document.getElementById('create-user-form');
     if (createUserForm) {
         createUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(createUserForm);
+            const payload = Object.fromEntries(formData);
+            const submitBtn = createUserForm.querySelector('button[type="submit"]');
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando...'; }
             try {
-                await API.createUser(Object.fromEntries(formData));
-                Notification.success('Usuario creado exitosamente');
+                const created = await API.createUser(payload);
+                // user.controller.createUser devuelve { data: { id, username, ... } }
+                const newUserId = created && created.data && created.data.id;
+
+                // Capturar deptos y roles seleccionados ANTES de cerrar el modal.
+                const deptIds = [...document.querySelectorAll('.create-user-dept-check')].filter(c => c.checked).map(c => Number(c.value));
+                const roleCodes = [...document.querySelectorAll('.create-user-role-check')].filter(c => c.checked).map(c => c.dataset.code);
+
+                let assignedDepts = 0, assignedRoles = 0;
+                if (newUserId && (deptIds.length > 0 || roleCodes.length > 0)) {
+                    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+                    for (const dId of deptIds) {
+                        const r = await fetch(`/api/rbac/users/${newUserId}/departments/${dId}`, {
+                            method: 'POST', headers, body: JSON.stringify({ is_head: false })
+                        });
+                        if (r.ok) assignedDepts++;
+                    }
+                    for (const code of roleCodes) {
+                        const r = await fetch(`/api/rbac/users/${newUserId}/roles/${code}`, {
+                            method: 'POST', headers, body: JSON.stringify({})
+                        });
+                        if (r.ok) assignedRoles++;
+                    }
+                }
+
+                const extras = [];
+                if (assignedDepts > 0) extras.push(`${assignedDepts} depto${assignedDepts !== 1 ? 's' : ''}`);
+                if (assignedRoles > 0) extras.push(`${assignedRoles} rol${assignedRoles !== 1 ? 'es' : ''}`);
+                Notification.success(extras.length > 0
+                    ? `Usuario creado · ${extras.join(' · ')} asignados`
+                    : 'Usuario creado exitosamente');
+
                 closeModal('create-user-modal');
                 loadUsers();
             } catch (error) {
                 Notification.error(error.message || 'Error al crear usuario');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear Usuario'; }
             }
         });
     }
@@ -282,7 +357,14 @@ function setupAdminForms() {
 
 // Delete Functions
 async function deleteUser(userId) {
-    if (!confirm('¿Está seguro de eliminar este usuario?')) return;
+    const u = currentUsers.find(x => x.id === userId);
+    const ok = await confirmDialog({
+        title: '¿Eliminar usuario?',
+        message: `Vas a eliminar a "${u ? (u.full_name || u.username) : 'este usuario'}". Pierde su acceso, sus permisos y sus solicitudes (RRHH se desvincula). No se puede deshacer.`,
+        confirmText: 'Eliminar usuario',
+        typeToConfirm: 'ELIMINAR'
+    });
+    if (!ok) return;
     try {
         await API.deleteUser(userId);
         Notification.success('Usuario eliminado');
@@ -292,7 +374,18 @@ async function deleteUser(userId) {
     }
 }
 async function deleteReport(reportId) {
-    if (!confirm('¿Está seguro de eliminar este reporte?')) return;
+    const r = currentAllReports.find(x => x.id === reportId);
+    const userCount = r && r.users_with_access ? r.users_with_access : 0;
+    const impact = userCount > 0
+        ? `Afecta a ${userCount} usuario${userCount !== 1 ? 's' : ''} con acceso asignado.`
+        : 'Nadie tiene acceso asignado a este reporte hoy.';
+    const ok = await confirmDialog({
+        title: '¿Eliminar reporte?',
+        message: `Vas a eliminar "${r ? r.name : 'este reporte'}". ${impact} La acción no se puede deshacer.`,
+        confirmText: 'Eliminar reporte',
+        typeToConfirm: 'ELIMINAR'
+    });
+    if (!ok) return;
     try {
         await API.deleteReport(reportId);
         Notification.success('Reporte eliminado');
@@ -357,17 +450,24 @@ async function _fetchAclMap(resourceType, resourceId) {
 }
 
 function _setupAccessSubTabs(modalSelector, tabAttr) {
-    document.querySelectorAll(`${modalSelector} [${tabAttr}]`).forEach(btn => {
+    const prefix = modalSelector === '#access-modal' ? 'access' : 'doc-access';
+    const tabBtns   = document.querySelectorAll(`${modalSelector} [${tabAttr}]`);
+    const tabBodies = document.querySelectorAll(`${modalSelector} > .modal-content > .modal-body > .tab-content`);
+    tabBtns.forEach(btn => {
         btn.onclick = () => {
-            document.querySelectorAll(`${modalSelector} [${tabAttr}]`).forEach(b => b.classList.remove('active'));
+            tabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const id = btn.getAttribute(tabAttr);
-            const prefix = modalSelector === '#access-modal' ? 'access' : 'doc-access';
-            document.querySelectorAll(`${modalSelector} > .modal-content > .modal-body > .tab-content`).forEach(c => c.classList.remove('active'));
+            tabBodies.forEach(c => c.classList.remove('active'));
             const target = document.getElementById(`${prefix}-${id}-tab`);
             if (target) target.classList.add('active');
         };
     });
+    // Reset al estado inicial: sub-tab "Usuarios" activa, las otras ocultas.
+    // Sin esto, si el admin abre el modal por segunda vez (o si setupAdminTabs
+    // borró el active al navegar tabs), el body queda vacío.
+    tabBtns.forEach(b => b.classList.toggle('active', b.getAttribute(tabAttr) === 'users'));
+    tabBodies.forEach(c => c.classList.toggle('active', c.id === `${prefix}-users-tab`));
 }
 
 function _renderCheckList(containerId, items, currentIds, klass) {

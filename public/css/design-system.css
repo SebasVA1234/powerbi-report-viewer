@@ -803,3 +803,330 @@ tr.archived td {
     70%  { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
     100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
+
+/* ============================================================
+   PR-FINALIZE-PROTOTYPE — overrides de contraste y semántica
+   ============================================================
+   Auditoría visual encontró textos negros sobre fondo dark, pills
+   blancas, cards blancas y botones de acción sin diferenciación.
+   Estos overrides corrigen sin tocar el HTML de cada vista.
+   ============================================================ */
+
+/* --- Headings que el legacy dejaba en gris-900 --- */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-1) !important;
+}
+.section-title h2,
+.welcome-header h1,
+.tab-header h3,
+.category-header h3,
+.settings-section h4,
+.system-info h4,
+.profile-card h3,
+.profile-card-header h3,
+.modal-header h3 {
+    color: var(--text-1) !important;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.section-title p,
+.welcome-header p {
+    color: var(--text-2) !important;
+}
+
+/* --- Pills blancas: stat-reports, category-count, info chips --- */
+#stat-reports,
+#stat-documents,
+.category-count,
+.welcome-stats .stat-pill,
+.tab-header .stat-pill {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: none !important;
+    padding: 0.35rem 0.85rem !important;
+    border-radius: var(--radius-pill) !important;
+    font-weight: 600;
+    font-size: 0.8rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* Counter pill (Documentos / Reportes) — wrapper externo en píldora */
+.reports-counter {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-1) !important;
+    border-radius: var(--radius-pill) !important;
+    box-shadow: none !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.reports-counter .counter-number,
+.reports-counter .counter-label {
+    color: var(--text-1) !important;
+}
+.reports-counter .counter-label {
+    color: var(--text-2) !important;
+}
+
+/* Welcome / refresh button blanco -> glass */
+.welcome-actions .btn,
+.welcome-actions button,
+.btn-refresh,
+button.btn-outline {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+}
+.welcome-actions .btn:hover,
+.welcome-actions button:hover,
+.btn-refresh:hover,
+button.btn-outline:hover {
+    background: rgba(255, 255, 255, 0.10) !important;
+    border-color: var(--border-strong) !important;
+}
+
+/* --- Cards blancas que se filtraron (Cotizador, Mi Perfil, etc.) --- */
+.cotizador-form,
+.cotizador-container > .form-card,
+.cotizador-container > .resultado-card,
+.profile-form,
+.profile-container .form-card,
+.empty-state,
+.settings-container .settings-section,
+.settings-container .system-info {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    color: var(--text-1) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+.empty-state h3 { color: var(--text-1) !important; }
+.empty-state p  { color: var(--text-2) !important; }
+.empty-state svg { stroke: var(--text-3) !important; opacity: 0.6; }
+
+/* Inputs sueltos en form-group / cotizador / profile */
+.form-group input[type="text"],
+.form-group input[type="email"],
+.form-group input[type="password"],
+.form-group input[type="number"],
+.form-group input[type="date"],
+.form-group input[type="search"],
+.form-group select,
+.form-group textarea,
+.cotizador-form input,
+.cotizador-form select,
+.cotizador-form textarea,
+.profile-form input,
+.profile-form select {
+    background: var(--bg-input) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 0.6rem 0.8rem;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus,
+.cotizador-form input:focus,
+.cotizador-form select:focus,
+.profile-form input:focus {
+    outline: none;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+}
+.form-group label,
+.cotizador-form label,
+.profile-form label,
+.setting-item label {
+    color: var(--text-2) !important;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+.cotizador-form input::placeholder,
+.cotizador-form textarea::placeholder,
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+    color: var(--text-3) !important;
+}
+
+/* --- File input nativo: tematizar el botón --- */
+input[type="file"] {
+    background: var(--bg-input) !important;
+    color: var(--text-2) !important;
+    border: 1px dashed var(--border-strong) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 0.6rem;
+    cursor: pointer;
+    width: 100%;
+}
+input[type="file"]::file-selector-button {
+    background: var(--gradient-brand) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 0.45rem 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-right: 0.75rem;
+    transition: filter var(--transition-fast);
+}
+input[type="file"]::file-selector-button:hover {
+    filter: brightness(1.1);
+}
+
+/* --- Botones de acción semánticos: cada uno con su tinte ya en reposo --- */
+.btn-edit {
+    color: var(--primary-light) !important;
+    border-color: rgba(99, 102, 241, 0.35) !important;
+    background: rgba(99, 102, 241, 0.05) !important;
+}
+.btn-permissions {
+    color: var(--accent-light) !important;
+    border-color: rgba(16, 185, 129, 0.35) !important;
+    background: rgba(16, 185, 129, 0.05) !important;
+}
+.btn-delete {
+    color: #fca5a5 !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    background: rgba(239, 68, 68, 0.06) !important;
+}
+.btn-edit:hover         { background: rgba(99, 102, 241, 0.18) !important; border-color: var(--primary) !important; color: white !important; }
+.btn-permissions:hover  { background: rgba(16, 185, 129, 0.18) !important; border-color: var(--accent) !important; color: white !important; }
+.btn-delete:hover       { background: rgba(239, 68, 68, 0.22) !important;  border-color: var(--danger) !important; color: white !important; }
+
+.btn-icon { color: var(--text-2) !important; background: transparent !important; border: 1px solid var(--border) !important; }
+.btn-icon.danger { color: #fca5a5 !important; border-color: rgba(239, 68, 68, 0.4) !important; }
+.btn-icon.danger:hover { color: white !important; background: rgba(239, 68, 68, 0.18) !important; border-color: var(--danger) !important; }
+.btn-icon:hover { color: white !important; background: rgba(255,255,255,0.06) !important; }
+
+/* --- Sub-tabs dentro de modales: indicador activo más claro --- */
+.modal .admin-tabs .tab-btn.active {
+    background: rgba(99, 102, 241, 0.18) !important;
+    color: var(--primary-light) !important;
+    border-bottom: 2px solid var(--primary) !important;
+}
+
+/* --- Setting items inline (Configuración) --- */
+.setting-item {
+    background: rgba(255,255,255,0.03) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    padding: 1rem !important;
+    color: var(--text-1) !important;
+}
+.setting-item p,
+.setting-info p,
+.setting-description {
+    color: var(--text-2) !important;
+}
+.system-info .info-item .info-label { color: var(--text-3) !important; }
+.system-info .info-item .info-value { color: var(--text-1) !important; }
+
+/* --- Notification toasts: glass en lugar de blanco --- */
+#notification-container .notification,
+.notification {
+    background: var(--bg-card) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+    border-left-width: 4px !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-lg) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.notification.success { border-left-color: var(--accent) !important; }
+.notification.error   { border-left-color: var(--danger) !important; }
+.notification.warning { border-left-color: var(--warn) !important; }
+.notification.info    { border-left-color: var(--info) !important; }
+
+/* Tabs RRHH: prevenir que se pierda el label en viewport estrecho */
+#hr-section .admin-tabs .tab-btn {
+    flex-shrink: 0;
+    min-width: max-content;
+}
+#hr-section .admin-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: thin;
+}
+
+/* Confirm dialog estilizado (Fase 2) */
+.confirm-dialog-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex; align-items: center; justify-content: center;
+    animation: fade-in 150ms ease;
+}
+.confirm-dialog {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: min(440px, 90vw);
+    padding: 1.5rem;
+}
+.confirm-dialog h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-1);
+    font-size: 1.1rem;
+}
+.confirm-dialog .confirm-msg {
+    color: var(--text-2);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+.confirm-dialog .confirm-type-row {
+    margin-bottom: 1rem;
+}
+.confirm-dialog .confirm-type-row label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-3);
+    margin-bottom: 0.4rem;
+}
+.confirm-dialog input[type="text"] {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    color: var(--text-1);
+    padding: 0.55rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+}
+.confirm-dialog input[type="text"]:focus {
+    outline: none;
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+.confirm-dialog .confirm-actions {
+    display: flex; gap: 0.5rem; justify-content: flex-end;
+}
+.confirm-dialog .btn-confirm-cancel {
+    background: rgba(255,255,255,0.06);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+    padding: 0.55rem 1rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.confirm-dialog .btn-confirm-confirm {
+    background: var(--danger);
+    color: white;
+    border: 1px solid var(--danger);
+    padding: 0.55rem 1rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 600;
+}
+.confirm-dialog .btn-confirm-confirm:disabled {
+    opacity: 0.4; cursor: not-allowed;
+}
+.confirm-dialog .btn-confirm-confirm:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
