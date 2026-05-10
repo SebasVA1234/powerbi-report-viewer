@@ -31,12 +31,8 @@ function setupAdminTabs() {
                 switch (tab.dataset.tab) {
                     case 'users': loadUsers(); break;
                     case 'reports': loadAllReports(); break;
-                    case 'permissions': loadPermissionsMatrix(); break;
                     case 'documents':
                         if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
-                        break;
-                    case 'doc-permissions':
-                        if (typeof loadDocumentsPermissionsMatrix === 'function') loadDocumentsPermissionsMatrix();
                         break;
                     case 'settings': loadSettings(); break;
                     // PR-1d: tabs nuevos
@@ -320,91 +316,197 @@ function editReport(reportId) {
     document.getElementById('edit-report-modal').classList.add('active');
 }
 
-// MANAGE ACCESS MODAL (NUEVO)
+// ============================================================
+// MANAGE ACCESS MODAL — 3 vistas (usuarios / departamentos / roles)
+// ============================================================
+// Usuarios: usa el legacy user_report_permissions vía syncReportPermissions
+// (atómico, ya existía).
+// Departamentos / Roles: usa resource_acl. Como no hay sync atómico para
+// estos, calculamos un diff entre el estado actual y el deseado, y emitimos
+// POST/DELETE individuales. Es idempotente y la UI bloquea el botón
+// mientras corre. Si una operación falla a mitad, mostramos qué se grabó.
+
+const _accessState = {
+    resourceType: null,   // 'report' | 'document'
+    resourceId: null,
+    initialAcls: null     // map principal_type -> Set<principal_id> según GET /acl/resource
+};
+
+async function _fetchPrincipalsCatalogue() {
+    const [usersResp, deptsResp, rolesResp] = await Promise.all([
+        API.getUsers({ limit: 500 }),
+        fetch('/api/rbac/departments', { headers: { Authorization: 'Bearer ' + Utils.getToken() } }).then(r => r.json()),
+        fetch('/api/rbac/roles',        { headers: { Authorization: 'Bearer ' + Utils.getToken() } }).then(r => r.json())
+    ]);
+    return {
+        users: (usersResp.data && (usersResp.data.users || usersResp.data)) || [],
+        departments: (deptsResp.data && deptsResp.data.departments) || [],
+        roles: (rolesResp.data && rolesResp.data.roles) || []
+    };
+}
+
+async function _fetchAclMap(resourceType, resourceId) {
+    const r = await fetch(`/api/rbac/acl/resource/${resourceType}/${resourceId}`, {
+        headers: { Authorization: 'Bearer ' + Utils.getToken() }
+    });
+    const j = await r.json();
+    const acls = (j.data && j.data.acls) || [];
+    const map = { user: new Map(), department: new Map(), role: new Map() };
+    acls.forEach(a => map[a.principal_type] && map[a.principal_type].set(a.principal_id, a.id));
+    return map;
+}
+
+function _setupAccessSubTabs(modalSelector, tabAttr) {
+    document.querySelectorAll(`${modalSelector} [${tabAttr}]`).forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll(`${modalSelector} [${tabAttr}]`).forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const id = btn.getAttribute(tabAttr);
+            const prefix = modalSelector === '#access-modal' ? 'access' : 'doc-access';
+            document.querySelectorAll(`${modalSelector} > .modal-content > .modal-body > .tab-content`).forEach(c => c.classList.remove('active'));
+            const target = document.getElementById(`${prefix}-${id}-tab`);
+            if (target) target.classList.add('active');
+        };
+    });
+}
+
+function _renderCheckList(containerId, items, currentIds, klass) {
+    const container = document.getElementById(containerId);
+    if (!items || items.length === 0) {
+        container.innerHTML = '<p class="empty">Sin elementos disponibles.</p>';
+        return;
+    }
+    container.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        ${items.map(it => {
+            const checked = currentIds.has(it.id) ? 'checked' : '';
+            return `
+                <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border-radius:8px; background:rgba(255,255,255,0.04); cursor:pointer;">
+                    <input type="checkbox" class="${klass}" value="${it.id}" ${checked}>
+                    <span>${Utils.escapeHtml ? Utils.escapeHtml(it.label) : it.label}</span>
+                </label>
+            `;
+        }).join('')}
+        </div>
+    `;
+}
+
+// MANAGE ACCESS MODAL — Reportes
 async function showReportAccessModal(reportId, reportName) {
     document.getElementById('access-modal-title').innerText = `Accesos: ${reportName}`;
     document.getElementById('access-report-id').value = reportId;
-    
-    const container = document.getElementById('user-list-checkboxes');
-    container.innerHTML = '<div class="loading">Cargando usuarios...</div>';
-    
+    _accessState.resourceType = 'report';
+    _accessState.resourceId = reportId;
+
+    document.getElementById('user-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
+    document.getElementById('dept-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
+    document.getElementById('role-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
     document.getElementById('access-modal').classList.add('active');
 
+    _setupAccessSubTabs('#access-modal', 'data-access-tab');
+
     try {
-        // Obtenemos usuarios y permisos actuales
-        const [usersResponse, matrixResponse] = await Promise.all([
-            API.getUsers(),
+        const [{ users, departments, roles }, aclMap, matrixResp] = await Promise.all([
+            _fetchPrincipalsCatalogue(),
+            _fetchAclMap('report', reportId),
             API.getPermissionsMatrix()
         ]);
 
-        if (usersResponse.success && matrixResponse.success) {
-            const users = usersResponse.data.users;
-            const matrix = matrixResponse.data.matrix;
-            
-            let html = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">';
-            
-            users.forEach(user => {
-                if (user.role === 'admin') return; // Opcional: Ocultar admins
+        // Usuarios: combinamos legacy (user_report_permissions) + ACL principal_type='user'.
+        const matrix = (matrixResp.data && matrixResp.data.matrix) || [];
+        const legacyUserIds = new Set();
+        matrix.forEach(row => {
+            const p = row.permissions[reportId];
+            if (p && p.can_view) legacyUserIds.add(row.user.id);
+        });
+        const aclUserIds = new Set([...aclMap.user.keys()]);
+        const allUserIds = new Set([...legacyUserIds, ...aclUserIds]);
+        const userItems = users
+            .filter(u => u.role !== 'admin')
+            .map(u => ({ id: u.id, label: `${u.full_name} (@${u.username})` }));
 
-                // Verificar si ya tiene permiso
-                const userRow = matrix.find(row => row.user.id === user.id);
-                const hasAccess = userRow && userRow.permissions[reportId] && userRow.permissions[reportId].can_view;
+        _renderCheckList('user-list-checkboxes', userItems, allUserIds, 'user-access-checkbox');
+        _renderCheckList('dept-list-checkboxes',
+            departments.map(d => ({ id: d.id, label: d.name })),
+            new Set(aclMap.department.keys()), 'dept-access-checkbox');
+        _renderCheckList('role-list-checkboxes',
+            roles.map(r => ({ id: r.id, label: r.name + ' [' + r.code + ']' })),
+            new Set(aclMap.role.keys()), 'role-access-checkbox');
 
-                html += `
-                    <label style="display: flex; align-items: center; justify-content: space-between; padding: 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer; border: 1px solid #dee2e6;">
-                        <span style="font-weight: 500;">${user.full_name}</span>
-                        <input type="checkbox" class="user-access-checkbox" value="${user.id}" ${hasAccess ? 'checked' : ''} style="width: 18px; height: 18px;">
-                    </label>
-                `;
-            });
-            html += '</div>';
-            
-            if (users.length === 0) html = '<p>No hay usuarios disponibles.</p>';
-            
-            container.innerHTML = html;
-        }
+        _accessState.initialAcls = aclMap;
+        _accessState.legacyUsers = legacyUserIds;
     } catch (error) {
-        container.innerHTML = '<p class="error">Error al cargar datos</p>';
+        console.error(error);
+        document.getElementById('user-list-checkboxes').innerHTML = '<p class="error">Error cargando datos: ' + (error.message || error) + '</p>';
     }
 }
 
-// SAVE PERMISSIONS — usa el endpoint /sync que hace todo en una transacción atómica.
-// Ya no hay errores "Permiso no encontrado" al desmarcar usuarios que no tenían acceso.
-async function savePermissions() {
-    const reportId = parseInt(document.getElementById('access-report-id').value, 10);
-    const checkboxes = document.querySelectorAll('.user-access-checkbox');
-    const saveBtn = document.querySelector('#access-modal .btn-primary');
+async function _diffAclSave(resourceType, resourceId, principalType, currentMap, desiredIds) {
+    const desired = new Set(desiredIds);
+    const current = new Set(currentMap.keys());
+    const toAdd = [...desired].filter(id => !current.has(id));
+    const toRemove = [...current].filter(id => !desired.has(id));
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+    let added = 0, removed = 0;
+    for (const id of toAdd) {
+        const r = await fetch('/api/rbac/acl', {
+            method: 'POST', headers,
+            body: JSON.stringify({
+                resource_type: resourceType,
+                resource_id: resourceId,
+                principal_type: principalType,
+                principal_id: id,
+                actions: ['view']
+            })
+        });
+        if (r.ok) added++;
+    }
+    for (const id of toRemove) {
+        const aclId = currentMap.get(id);
+        const r = await fetch('/api/rbac/acl/' + aclId, { method: 'DELETE', headers });
+        if (r.ok) removed++;
+    }
+    return { added, removed };
+}
 
-    // Recolectar IDs de usuarios marcados
-    const userIds = [];
-    checkboxes.forEach(cb => {
-        if (cb.checked) {
-            const id = parseInt(cb.value, 10);
-            if (Number.isInteger(id) && id > 0) userIds.push(id);
-        }
-    });
+async function saveReportAccessAll() {
+    const reportId = parseInt(document.getElementById('access-report-id').value, 10);
+    const saveBtn = document.querySelector('#access-modal .btn-primary');
+    const userIds = [...document.querySelectorAll('.user-access-checkbox')].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const deptIds = [...document.querySelectorAll('.dept-access-checkbox')].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const roleIds = [...document.querySelectorAll('.role-access-checkbox')].filter(cb => cb.checked).map(cb => Number(cb.value));
 
     saveBtn.disabled = true;
-    const originalText = saveBtn.innerText;
+    const orig = saveBtn.innerText;
     saveBtn.innerText = 'Guardando...';
-
     try {
-        const resp = await API.syncReportPermissions(reportId, userIds);
-        if (resp && resp.success) {
-            Notification.success(`Accesos actualizados (${userIds.length} usuario${userIds.length !== 1 ? 's' : ''})`);
-            closeModal('access-modal');
-            if (typeof loadAllReports === 'function') loadAllReports();
-        } else {
-            Notification.error((resp && resp.message) || 'No se pudieron guardar los accesos');
-        }
+        // Users: legacy sync (atómico).
+        const userResp = await API.syncReportPermissions(reportId, userIds);
+        if (!userResp || !userResp.success) throw new Error(userResp && userResp.message || 'fallo guardando usuarios');
+
+        // Dept / Role: diff vs initial state via ACL.
+        const deptDiff = await _diffAclSave('report', reportId, 'department', _accessState.initialAcls.department, deptIds);
+        const roleDiff = await _diffAclSave('report', reportId, 'role',       _accessState.initialAcls.role,       roleIds);
+
+        Notification.success(
+            `Guardado: ${userIds.length} user${userIds.length !== 1 ? 's' : ''} · ` +
+            `+${deptDiff.added}/-${deptDiff.removed} depto · ` +
+            `+${roleDiff.added}/-${roleDiff.removed} rol`
+        );
+        closeModal('access-modal');
+        if (typeof loadAllReports === 'function') loadAllReports();
     } catch (error) {
-        console.error('savePermissions:', error);
+        console.error('saveReportAccessAll:', error);
         Notification.error(error.message || 'Error al guardar accesos');
     } finally {
         saveBtn.disabled = false;
-        saveBtn.innerText = originalText || 'Guardar Accesos';
+        saveBtn.innerText = orig || 'Guardar Accesos';
     }
 }
+
+// Compatibilidad con el wiring viejo en app.js.
+window.savePermissions = saveReportAccessAll;
+window.saveReportAccessAll = saveReportAccessAll;
 
 // Placeholders
 function showBulkAssignModal() { Notification.info('Asignación masiva en desarrollo'); }

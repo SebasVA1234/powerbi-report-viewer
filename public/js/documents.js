@@ -145,10 +145,31 @@ function escapeHtml(s) {
 
 // ---------- Visor de PDF seguro ----------
 
+// Espera a que pdfjsLib esté disponible. El <script type="module"> de
+// index.html lo expone async; si openDocument se invoca antes (en un
+// click muy rápido tras cargar la página), reintentamos con backoff.
+function waitForPdfJs(timeoutMs = 5000) {
+    if (window['pdfjsLib']) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const start = Date.now();
+        const onReady = () => { cleanup(); resolve(); };
+        const tick = () => {
+            if (window['pdfjsLib']) { cleanup(); resolve(); return; }
+            if (Date.now() - start > timeoutMs) { cleanup(); reject(new Error('PDF.js no cargó')); return; }
+            setTimeout(tick, 100);
+        };
+        const cleanup = () => window.removeEventListener('pdfjs-ready', onReady);
+        window.addEventListener('pdfjs-ready', onReady, { once: true });
+        tick();
+    });
+}
+
 async function openDocument(documentId) {
     try {
-        if (!window['pdfjsLib']) {
-            Notification.error('No se pudo cargar el visor. Revise su conexión a internet.');
+        try {
+            await waitForPdfJs();
+        } catch {
+            Notification.error('No se pudo cargar el visor de PDFs.');
             return;
         }
 
@@ -475,85 +496,168 @@ async function deleteDocument(id) {
     }
 }
 
-// ---------- ADMIN: Permisos de documentos ----------
+// ---------- ADMIN: Permisos de documentos (3 vistas: usuarios / depto / rol) ----------
+// Mismo patrón que showReportAccessModal: legacy sync para usuarios + ACL diff
+// para departamentos y roles. Ver admin.js para el helper compartido.
 
-let _docAccessState = { documentId: null, users: [] };
+let _docAccessState = { documentId: null, initialAcls: null, legacyUsers: null };
+
+async function _docFetchPrincipalsCatalogue() {
+    const [usersResp, deptsResp, rolesResp] = await Promise.all([
+        API.getUsers({ limit: 500 }),
+        fetch('/api/rbac/departments', { headers: { Authorization: 'Bearer ' + Utils.getToken() } }).then(r => r.json()),
+        fetch('/api/rbac/roles',        { headers: { Authorization: 'Bearer ' + Utils.getToken() } }).then(r => r.json())
+    ]);
+    return {
+        users: (usersResp.data && (usersResp.data.users || usersResp.data)) || [],
+        departments: (deptsResp.data && deptsResp.data.departments) || [],
+        roles: (rolesResp.data && rolesResp.data.roles) || []
+    };
+}
+
+async function _docFetchAclMap(resourceType, resourceId) {
+    const r = await fetch(`/api/rbac/acl/resource/${resourceType}/${resourceId}`, {
+        headers: { Authorization: 'Bearer ' + Utils.getToken() }
+    });
+    const j = await r.json();
+    const acls = (j.data && j.data.acls) || [];
+    const map = { user: new Map(), department: new Map(), role: new Map() };
+    acls.forEach(a => map[a.principal_type] && map[a.principal_type].set(a.principal_id, a.id));
+    return map;
+}
+
+function _docSetupAccessSubTabs() {
+    document.querySelectorAll('#doc-access-modal [data-doc-access-tab]').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('#doc-access-modal [data-doc-access-tab]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const id = btn.getAttribute('data-doc-access-tab');
+            document.querySelectorAll('#doc-access-modal > .modal-content > .modal-body > .tab-content').forEach(c => c.classList.remove('active'));
+            const target = document.getElementById('doc-access-' + id + '-tab');
+            if (target) target.classList.add('active');
+        };
+    });
+}
+
+function _docRenderCheckList(containerId, items, currentIds, klass) {
+    const container = document.getElementById(containerId);
+    if (!items || items.length === 0) {
+        container.innerHTML = '<p class="empty">Sin elementos disponibles.</p>';
+        return;
+    }
+    container.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        ${items.map(it => `
+            <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border-radius:8px; background:rgba(255,255,255,0.04); cursor:pointer;">
+                <input type="checkbox" class="${klass}" value="${it.id}" ${currentIds.has(it.id) ? 'checked' : ''}>
+                <span>${escapeHtml(it.label)}</span>
+            </label>
+        `).join('')}
+        </div>
+    `;
+}
 
 async function showDocumentAccessModal(documentId, documentName) {
+    document.getElementById('doc-access-modal-title').textContent = `Accesos - ${documentName}`;
+    document.getElementById('doc-access-document-id').value = documentId;
+
+    document.getElementById('doc-user-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
+    document.getElementById('doc-dept-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
+    document.getElementById('doc-role-list-checkboxes').innerHTML = '<div class="loading">Cargando...</div>';
+    document.getElementById('doc-access-modal').classList.add('active');
+
+    _docSetupAccessSubTabs();
+
     try {
-        const [usersResp, matrixResp] = await Promise.all([
-            API.getUsers({ limit: 500 }),
+        const [{ users, departments, roles }, aclMap, matrixResp] = await Promise.all([
+            _docFetchPrincipalsCatalogue(),
+            _docFetchAclMap('document', documentId),
             API.getDocumentsPermissionsMatrix()
         ]);
-        const users = (usersResp.data && (usersResp.data.users || usersResp.data)) || [];
-        const matrix = matrixResp.data.matrix || [];
-
-        _docAccessState.documentId = documentId;
-        _docAccessState.users = users;
-
-        document.getElementById('doc-access-modal-title').textContent = `Accesos - ${documentName}`;
-        document.getElementById('doc-access-document-id').value = documentId;
-
-        const currentPerms = {};
+        const matrix = (matrixResp.data && matrixResp.data.matrix) || [];
+        const legacyUserIds = new Set();
         matrix.forEach(row => {
-            const perm = row.permissions[documentId];
-            if (perm && perm.can_view) currentPerms[row.user.id] = true;
+            const p = row.permissions[documentId];
+            if (p && p.can_view) legacyUserIds.add(row.user.id);
         });
+        const aclUserIds = new Set([...aclMap.user.keys()]);
+        const allUserIds = new Set([...legacyUserIds, ...aclUserIds]);
 
-        const container = document.getElementById('doc-user-list-checkboxes');
-        container.innerHTML = users.filter(u => u.role !== 'admin').map(u => `
-            <label class="checkbox-row">
-                <input type="checkbox" class="doc-user-check" data-user-id="${u.id}" ${currentPerms[u.id] ? 'checked' : ''}>
-                <span>${escapeHtml(u.full_name || u.username)} <small>(${escapeHtml(u.username)})</small></span>
-            </label>
-        `).join('');
+        _docRenderCheckList('doc-user-list-checkboxes',
+            users.filter(u => u.role !== 'admin').map(u => ({ id: u.id, label: `${u.full_name || u.username} (@${u.username})` })),
+            allUserIds, 'doc-user-check');
+        _docRenderCheckList('doc-dept-list-checkboxes',
+            departments.map(d => ({ id: d.id, label: d.name })),
+            new Set(aclMap.department.keys()), 'doc-dept-check');
+        _docRenderCheckList('doc-role-list-checkboxes',
+            roles.map(r => ({ id: r.id, label: r.name + ' [' + r.code + ']' })),
+            new Set(aclMap.role.keys()), 'doc-role-check');
 
-        document.getElementById('doc-access-modal').classList.add('active');
+        _docAccessState = { documentId, initialAcls: aclMap, legacyUsers: legacyUserIds };
     } catch (err) {
-        Notification.error(err.message || 'Error al cargar accesos');
+        console.error(err);
+        document.getElementById('doc-user-list-checkboxes').innerHTML = '<p class="error">Error al cargar accesos: ' + (err.message || err) + '</p>';
     }
 }
 
-async function saveDocumentPermissions() {
-    const documentId = parseInt(document.getElementById('doc-access-document-id').value, 10);
-    const checks = document.querySelectorAll('.doc-user-check');
-    const saveBtn = document.querySelector('#doc-access-modal .btn-primary');
-
-    const userIds = [];
-    checks.forEach(ch => {
-        if (ch.checked) {
-            const id = parseInt(ch.dataset.userId, 10);
-            if (Number.isInteger(id) && id > 0) userIds.push(id);
-        }
-    });
-
-    if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn._origText = saveBtn.innerText;
-        saveBtn.innerText = 'Guardando...';
+async function _docDiffAclSave(resourceType, resourceId, principalType, currentMap, desiredIds) {
+    const desired = new Set(desiredIds);
+    const current = new Set(currentMap.keys());
+    const toAdd = [...desired].filter(id => !current.has(id));
+    const toRemove = [...current].filter(id => !desired.has(id));
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+    let added = 0, removed = 0;
+    for (const id of toAdd) {
+        const r = await fetch('/api/rbac/acl', {
+            method: 'POST', headers,
+            body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, principal_type: principalType, principal_id: id, actions: ['view'] })
+        });
+        if (r.ok) added++;
     }
+    for (const id of toRemove) {
+        const aclId = currentMap.get(id);
+        const r = await fetch('/api/rbac/acl/' + aclId, { method: 'DELETE', headers });
+        if (r.ok) removed++;
+    }
+    return { added, removed };
+}
 
+async function saveDocumentAccessAll() {
+    const documentId = parseInt(document.getElementById('doc-access-document-id').value, 10);
+    const saveBtn = document.querySelector('#doc-access-modal .btn-primary');
+    const userIds = [...document.querySelectorAll('.doc-user-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const deptIds = [...document.querySelectorAll('.doc-dept-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const roleIds = [...document.querySelectorAll('.doc-role-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
+
+    saveBtn.disabled = true;
+    const orig = saveBtn.innerText;
+    saveBtn.innerText = 'Guardando...';
     try {
-        // Sync atómico: define exactamente quién tiene acceso en una sola llamada.
-        const resp = await API.syncDocumentPermissions(documentId, userIds);
-        if (resp && resp.success) {
-            Notification.success(`Accesos actualizados (${userIds.length} usuario${userIds.length !== 1 ? 's' : ''})`);
-            closeModal('doc-access-modal');
-            if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
-            if (typeof loadDocumentsPermissionsMatrix === 'function') loadDocumentsPermissionsMatrix();
-        } else {
-            Notification.error((resp && resp.message) || 'No se pudieron guardar los accesos');
-        }
+        const userResp = await API.syncDocumentPermissions(documentId, userIds);
+        if (!userResp || !userResp.success) throw new Error(userResp && userResp.message || 'fallo guardando usuarios');
+
+        const deptDiff = await _docDiffAclSave('document', documentId, 'department', _docAccessState.initialAcls.department, deptIds);
+        const roleDiff = await _docDiffAclSave('document', documentId, 'role',       _docAccessState.initialAcls.role,       roleIds);
+
+        Notification.success(
+            `Guardado: ${userIds.length} user${userIds.length !== 1 ? 's' : ''} · ` +
+            `+${deptDiff.added}/-${deptDiff.removed} depto · ` +
+            `+${roleDiff.added}/-${roleDiff.removed} rol`
+        );
+        closeModal('doc-access-modal');
+        if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
     } catch (err) {
-        console.error('saveDocumentPermissions:', err);
+        console.error('saveDocumentAccessAll:', err);
         Notification.error(err.message || 'Error al guardar accesos');
     } finally {
-        if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.innerText = saveBtn._origText || 'Guardar Accesos';
-        }
+        saveBtn.disabled = false;
+        saveBtn.innerText = orig || 'Guardar Accesos';
     }
 }
+
+// Compat con wiring existente.
+window.saveDocumentPermissions = saveDocumentAccessAll;
+window.saveDocumentAccessAll  = saveDocumentAccessAll;
 
 async function loadDocumentsPermissionsMatrix() {
     const container = document.getElementById('doc-permissions-matrix');

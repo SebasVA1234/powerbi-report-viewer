@@ -1,6 +1,8 @@
+const fs = require('fs');
 const db = require('../config/db');
 const { getUserContext } = require('./rbac.controller');
 const { buildVisibilityFilter, canUserAccessResource } = require('./permission_resolver');
+const storage = require('../config/storage');
 
 class DocumentController {
     // Documentos disponibles para el usuario actual.
@@ -169,8 +171,9 @@ class DocumentController {
             const userId = req.user.id;
             const isAdmin = req.user.role === 'admin';
 
+            // PR-0c: leer storage_key (volumen) o caer al BLOB legacy.
             const row = await db.queryOne(`
-                SELECT file_data, mime_type, file_name, is_active
+                SELECT storage_key, file_data, mime_type, file_name, is_active
                 FROM documents WHERE id = ?
             `, [id]);
 
@@ -201,7 +204,19 @@ class DocumentController {
             res.setHeader('X-Content-Type-Options', 'nosniff');
             res.setHeader('X-Frame-Options', 'SAMEORIGIN');
 
-            // file_data viene como Buffer en ambos drivers (BLOB de SQLite, BYTEA de PG).
+            if (row.storage_key) {
+                const filePath = storage.resolveStoragePath(row.storage_key);
+                if (!fs.existsSync(filePath)) {
+                    console.error(`Storage miss para documento ${id}: ${filePath}`);
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Archivo del documento no se encuentra'
+                    });
+                }
+                fs.createReadStream(filePath).pipe(res);
+                return;
+            }
+            // Legacy: documentos viejos con BLOB en DB.
             res.end(row.file_data);
         } catch (error) {
             console.error('Error al transmitir documento:', error);
@@ -226,9 +241,14 @@ class DocumentController {
                 return res.status(400).json({ success: false, message: 'El nombre del documento es requerido' });
             }
 
+            // PR-0c: guardar al volumen y dejar file_data vacío. SQLite tiene
+            // file_data NOT NULL en el schema legacy → buffer vacío como sentinel.
+            const storageKey = storage.newStorageKey(file.originalname);
+            storage.writeBufferToStorage(storageKey, file.buffer);
+
             const result = await db.execute(
-                `INSERT INTO documents (name, description, category, file_name, mime_type, file_size, file_data, uploaded_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO documents (name, description, category, file_name, mime_type, file_size, file_data, storage_key, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     name,
                     description || '',
@@ -236,7 +256,8 @@ class DocumentController {
                     file.originalname,
                     file.mimetype,
                     file.size,
-                    file.buffer,        // Buffer — pg lo serializa a BYTEA, sqlite a BLOB
+                    Buffer.alloc(0),     // sentinel para schemas con NOT NULL legacy
+                    storageKey,
                     uploadedBy
                 ]
             );
@@ -312,12 +333,18 @@ class DocumentController {
         try {
             const { id } = req.params;
 
-            const document = await db.queryOne('SELECT name FROM documents WHERE id = ?', [id]);
+            const document = await db.queryOne('SELECT name, storage_key FROM documents WHERE id = ?', [id]);
             if (!document) {
                 return res.status(404).json({ success: false, message: 'Documento no encontrado' });
             }
 
             await db.execute('DELETE FROM documents WHERE id = ?', [id]);
+
+            // PR-0c: borrar el archivo del volumen también (si aplica).
+            if (document.storage_key) {
+                try { storage.deleteFromStorage(document.storage_key); }
+                catch (e) { console.warn('No se pudo borrar archivo del volumen:', e.message); }
+            }
 
             await db.execute(
                 'INSERT INTO access_logs (user_id, action, ip_address) VALUES (?, ?, ?)',

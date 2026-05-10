@@ -13,6 +13,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { requirePermission } = require('../controllers/rbac.controller');
 const HrController = require('../controllers/hr.controller');
+const HrMemosController = require('../controllers/hr_memos.controller');
 
 // Perfiles de cargo
 router.get('/positions',           authMiddleware, HrController.listPositions);
@@ -59,5 +60,15 @@ router.post('/time-off/:id/approve',
 router.post('/time-off/:id/reject',
     authMiddleware, requirePermission('hr.timeoff.approve'), HrController.rejectTimeOffRequest);
 router.post('/time-off/:id/cancel',       authMiddleware, HrController.cancelTimeOffRequest);
+
+// PR-3d: Memos / comunicados a empleados (historial inmutable).
+//   - inbox / sent / get: cualquier user logueado (visibilidad en controller).
+//   - create: requiere hr.memos.write (RRHH/Gerencia/jefes).
+//   - ack: cualquier user logueado puede acusar memos que le competen.
+router.get('/memos/inbox',  authMiddleware, requirePermission('hr.memos.read'), HrMemosController.listMyInbox);
+router.get('/memos/sent',   authMiddleware, requirePermission('hr.memos.read'), HrMemosController.listMySent);
+router.get('/memos/:id',    authMiddleware, requirePermission('hr.memos.read'), HrMemosController.getMemo);
+router.post('/memos',       authMiddleware, requirePermission('hr.memos.write'), HrMemosController.createMemo);
+router.post('/memos/:id/ack', authMiddleware, requirePermission('hr.memos.read'), HrMemosController.acknowledgeMemo);
 
 module.exports = router;
