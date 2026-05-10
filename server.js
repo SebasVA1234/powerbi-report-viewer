@@ -55,14 +55,15 @@ app.use(helmet({
         directives: {
             'default-src': ["'self'"],
             'script-src': ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-            'style-src': ["'self'", "'unsafe-inline'"],
-            'font-src': ["'self'", "data:"],
-            'img-src': ["'self'", "data:", "https:"],
-            'connect-src': ["'self'"],
+            // PR-2a: permitir Google Fonts (Inter) para el design system antigravity.
+            'style-src':  ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            'font-src':   ["'self'", "data:", "https://fonts.gstatic.com"],
+            'img-src':    ["'self'", "data:", "https:"],
+            'connect-src':["'self'"],
             'frame-ancestors': ["'self'"],
             'worker-src': ["'self'", "blob:"],
-            'frame-src': ["'self'", ...powerbiFrames],
-            'child-src': ["'self'", "blob:", ...powerbiFrames]
+            'frame-src':  ["'self'", ...powerbiFrames],
+            'child-src':  ["'self'", "blob:", ...powerbiFrames]
         }
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
