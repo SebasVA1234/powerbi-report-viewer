@@ -486,7 +486,13 @@ async function submitEditDocument(e) {
 }
 
 async function deleteDocument(id) {
-    if (!confirm('¿Eliminar este documento? Esta acción no se puede deshacer.')) return;
+    const ok = await confirmDialog({
+        title: '¿Eliminar documento?',
+        message: 'Se borra el archivo del volumen y todos los permisos asignados (usuarios, departamentos, roles). No se puede deshacer.',
+        confirmText: 'Eliminar documento',
+        typeToConfirm: 'ELIMINAR'
+    });
+    if (!ok) return;
     try {
         await API.deleteDocument(id);
         Notification.success('Documento eliminado');
@@ -527,16 +533,21 @@ async function _docFetchAclMap(resourceType, resourceId) {
 }
 
 function _docSetupAccessSubTabs() {
-    document.querySelectorAll('#doc-access-modal [data-doc-access-tab]').forEach(btn => {
+    const tabBtns   = document.querySelectorAll('#doc-access-modal [data-doc-access-tab]');
+    const tabBodies = document.querySelectorAll('#doc-access-modal > .modal-content > .modal-body > .tab-content');
+    tabBtns.forEach(btn => {
         btn.onclick = () => {
-            document.querySelectorAll('#doc-access-modal [data-doc-access-tab]').forEach(b => b.classList.remove('active'));
+            tabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const id = btn.getAttribute('data-doc-access-tab');
-            document.querySelectorAll('#doc-access-modal > .modal-content > .modal-body > .tab-content').forEach(c => c.classList.remove('active'));
+            tabBodies.forEach(c => c.classList.remove('active'));
             const target = document.getElementById('doc-access-' + id + '-tab');
             if (target) target.classList.add('active');
         };
     });
+    // Reset al estado inicial: Usuarios activa.
+    tabBtns.forEach(b => b.classList.toggle('active', b.getAttribute('data-doc-access-tab') === 'users'));
+    tabBodies.forEach(c => c.classList.toggle('active', c.id === 'doc-access-users-tab'));
 }
 
 function _docRenderCheckList(containerId, items, currentIds, klass) {

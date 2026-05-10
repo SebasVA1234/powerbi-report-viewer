@@ -240,33 +240,39 @@ function setupProfileForms() {
         });
     }
     
-    // Password Change Form
-    const passwordForm = document.getElementById('password-form');
+    // Password Change Form (sección Mi Perfil)
+    const passwordForm = document.getElementById('change-password-form');
     if (passwordForm) {
         passwordForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const currentPassword = document.getElementById('current-password').value;
-            const newPassword = document.getElementById('new-password').value;
-            const confirmPassword = document.getElementById('confirm-password').value;
-            
+
+            const currentPassword = document.getElementById('profile-current-password').value;
+            const newPassword     = document.getElementById('profile-new-password').value;
+            const confirmPassword = document.getElementById('profile-new-password-2').value;
+
             if (newPassword !== confirmPassword) {
-                Notification.error('Las contraseñas no coinciden');
+                Notification.error('Las contraseñas nuevas no coinciden');
                 return;
             }
-            
-            if (newPassword.length < 6) {
-                Notification.error('La contraseña debe tener al menos 6 caracteres');
+            if (newPassword.length < 8) {
+                Notification.error('La nueva contraseña debe tener al menos 8 caracteres');
                 return;
             }
-            
+            if (newPassword === currentPassword) {
+                Notification.error('La nueva contraseña no puede ser igual a la actual');
+                return;
+            }
+
+            const submitBtn = passwordForm.querySelector('button[type="submit"]');
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Cambiando...'; }
             try {
                 await API.changePassword(currentPassword, newPassword);
-                
-                Notification.success('Contraseña actualizada exitosamente');
+                Notification.success('Contraseña actualizada. La próxima vez que entres usá la nueva.');
                 passwordForm.reset();
             } catch (error) {
                 Notification.error(error.message || 'Error al cambiar contraseña');
+            } finally {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Cambiar contraseña'; }
             }
         });
     }

@@ -8,8 +8,9 @@
  *     attendance al hacer click en una fila (modal con empleado + horario)
  *   - Solicitudes: time-off filtradas por estado + crear + aprobar/rechazar
  *
- * UI austera (window.prompt para inputs cortos). Modales del design system
- * antigravity llegan en Fase 2.
+ * UI: usa formDialog/confirmDialog/infoDialog (públicos en window) — todos
+ * los flujos pasan por modales del design system antigravity, sin
+ * window.prompt/confirm/alert.
  */
 
 const hrAdmin = (function () {
@@ -189,30 +190,30 @@ const hrAdmin = (function () {
     }
 
     async function openCreateEmployee() {
-        const fullName = window.prompt('Nombre completo del empleado:');
-        if (!fullName) return;
         try {
-            const positions = await getPositions();
-            const depts = await getDepartments();
-            const posList = positions.map((p, i) => `${i + 1}. ${p.title} [${p.code}]`).join('\n');
-            const posIdx = window.prompt('Cargo (número):\n' + posList);
-            if (posIdx === null) return;
-            const pos = positions[Number(posIdx) - 1];
-            if (!pos) { Notification.error('Cargo inválido'); return; }
-            const deptList = depts.map((d, i) => `${i + 1}. ${d.name} [${d.code}]`).join('\n');
-            const deptIdx = window.prompt('Departamento (número):\n' + deptList);
-            if (deptIdx === null) return;
-            const dept = depts[Number(deptIdx) - 1];
-            if (!dept) { Notification.error('Departamento inválido'); return; }
-            const hire = window.prompt('Fecha de ingreso (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
-            const docId = window.prompt('Documento de identidad (opcional):') || null;
-
+            const [positions, depts] = await Promise.all([getPositions(), getDepartments()]);
+            const data = await formDialog({
+                title: 'Nuevo empleado',
+                description: 'El empleado puede vincularse a un usuario del sistema más tarde desde Editar.',
+                fields: [
+                    { name: 'full_name', label: 'Nombre completo', type: 'text', required: true },
+                    { name: 'position_id', label: 'Cargo', type: 'select', required: true,
+                      options: positions.map(p => ({ value: p.id, label: `${p.title} [${p.code}]` })) },
+                    { name: 'department_id', label: 'Departamento', type: 'select', required: true,
+                      options: depts.map(d => ({ value: d.id, label: `${d.name} [${d.code}]` })) },
+                    { name: 'hire_date', label: 'Fecha de ingreso', type: 'date',
+                      default: new Date().toISOString().slice(0, 10) },
+                    { name: 'doc_id', label: 'Documento de identidad', type: 'text', placeholder: 'Opcional' }
+                ],
+                confirmText: 'Crear empleado'
+            });
+            if (!data) return;
             await api('POST', '/api/hr/employees', {
-                full_name: fullName,
-                position_id: pos.id,
-                department_id: dept.id,
-                hire_date: hire || null,
-                doc_id: docId
+                full_name: data.full_name.trim(),
+                position_id: Number(data.position_id),
+                department_id: Number(data.department_id),
+                hire_date: data.hire_date || null,
+                doc_id: data.doc_id || null
             });
             Notification.success('Empleado creado');
             invalidateEmployeesCache();
@@ -226,13 +227,23 @@ const hrAdmin = (function () {
         try {
             const r = await api('GET', `/api/hr/employees/${id}`);
             const e = r.data.employee;
-            const newName = window.prompt('Nombre completo:', e.full_name);
-            if (newName === null) return;
-            const newStatus = window.prompt('Estado (active / on_leave / terminated):', e.status);
-            if (newStatus === null) return;
+            const data = await formDialog({
+                title: `Editar empleado · ${e.full_name}`,
+                fields: [
+                    { name: 'full_name', label: 'Nombre completo', type: 'text', required: true, default: e.full_name },
+                    { name: 'status', label: 'Estado', type: 'select', required: true, default: e.status,
+                      options: [
+                        { value: 'active', label: 'Activo' },
+                        { value: 'on_leave', label: 'En licencia' },
+                        { value: 'terminated', label: 'Dado de baja' }
+                      ] }
+                ],
+                confirmText: 'Guardar cambios'
+            });
+            if (!data) return;
             await api('PUT', `/api/hr/employees/${id}`, {
-                full_name: newName,
-                status: newStatus
+                full_name: data.full_name.trim(),
+                status: data.status
             });
             Notification.success('Empleado actualizado');
             invalidateEmployeesCache();
@@ -243,17 +254,13 @@ const hrAdmin = (function () {
     }
 
     async function deleteEmployee(id, name) {
-        const confirm1 = window.confirm(
-            `¿Eliminar definitivamente a "${name}"?\n\n` +
-            `Se borran TAMBIÉN sus asistencias a feriados y solicitudes de tiempo libre.\n` +
-            `Si solo querés darle de baja, mejor editá el estado a "terminated".`
-        );
-        if (!confirm1) return;
-        const typed = window.prompt(`Para confirmar, escribí: ELIMINAR`);
-        if (typed !== 'ELIMINAR') {
-            Notification.info('Cancelado.');
-            return;
-        }
+        const ok = await confirmDialog({
+            title: `¿Eliminar a ${name}?`,
+            message: 'Se borran sus asistencias a feriados y solicitudes de tiempo libre. Si solo querés darle de baja, editá el estado a "Dado de baja". No se puede deshacer.',
+            confirmText: 'Eliminar empleado',
+            typeToConfirm: 'ELIMINAR'
+        });
+        if (!ok) return;
         try {
             await api('DELETE', `/api/hr/employees/${id}`);
             Notification.success(`"${name}" eliminado`);
@@ -268,12 +275,10 @@ const hrAdmin = (function () {
         try {
             const r = await api('GET', `/api/hr/employees/${id}/compensated-balance`);
             const d = r.data;
-            window.alert(
-                `Banco de días compensados de ${name}:\n\n` +
-                `  Acumulados: ${d.days_accrued}\n` +
-                `  Usados:     ${d.days_used}\n` +
-                `  Disponibles: ${d.balance}`
-            );
+            await infoDialog({
+                title: `Banco de días compensados · ${name}`,
+                message: `Acumulados: ${d.days_accrued}\nUsados: ${d.days_used}\nDisponibles: ${d.balance}`
+            });
         } catch (err) {
             Notification.error('Error: ' + err.message);
         }
@@ -311,18 +316,28 @@ const hrAdmin = (function () {
     }
 
     async function openCreateHoliday() {
-        const date = window.prompt('Fecha del feriado (YYYY-MM-DD):');
-        if (!date) return;
-        const name = window.prompt('Nombre del feriado:');
-        if (!name) return;
-        const desc = window.prompt('Descripción (opcional, ej: "Decretado por gobierno"):');
-        const isNational = window.confirm('¿Es feriado nacional? (Cancel = decretado custom)');
+        const data = await formDialog({
+            title: 'Nuevo feriado',
+            description: 'Agregá un feriado nacional o uno decretado por el gobierno fuera del calendario base.',
+            fields: [
+                { name: 'date', label: 'Fecha', type: 'date', required: true },
+                { name: 'name', label: 'Nombre del feriado', type: 'text', required: true },
+                { name: 'desc', label: 'Descripción', type: 'textarea', placeholder: 'Opcional' },
+                { name: 'national', label: 'Tipo', type: 'select', default: '1',
+                  options: [
+                    { value: '1', label: 'Nacional' },
+                    { value: '0', label: 'Decretado / custom' }
+                  ] }
+            ],
+            confirmText: 'Crear feriado'
+        });
+        if (!data) return;
         try {
             await api('POST', '/api/hr/holidays', {
-                holiday_date: date,
-                name,
-                description: desc || null,
-                is_national: isNational
+                holiday_date: data.date,
+                name: data.name.trim(),
+                description: data.desc || null,
+                is_national: data.national === '1'
             });
             Notification.success('Feriado creado');
             loadHolidays();
@@ -332,7 +347,13 @@ const hrAdmin = (function () {
     }
 
     async function deleteHoliday(id) {
-        if (!window.confirm('¿Archivar este feriado? Las asistencias históricas se preservan.')) return;
+        const ok = await confirmDialog({
+            title: '¿Archivar este feriado?',
+            message: 'Se marca como inactivo en el calendario. Las asistencias históricas y los días compensados que generó se preservan.',
+            confirmText: 'Archivar',
+            danger: false
+        });
+        if (!ok) return;
         try {
             await api('DELETE', `/api/hr/holidays/${id}`);
             Notification.success('Feriado archivado');
@@ -346,27 +367,31 @@ const hrAdmin = (function () {
         try {
             const emps = await getEmployees();
             if (emps.length === 0) {
-                Notification.error('No hay empleados registrados todavía. Crealos primero.');
+                Notification.error('No hay empleados registrados. Crealos primero.');
                 return;
             }
-            const list = emps.map((e, i) => `${i + 1}. ${e.full_name} (${e.department_name || '-'})`).join('\n');
-            const idx = window.prompt(
-                `Registrar quien trabajó "${holidayName}" (${holidayDate}):\n\n` +
-                'Empleado (número):\n' + list
-            );
-            if (idx === null) return;
-            const emp = emps[Number(idx) - 1];
-            if (!emp) { Notification.error('Empleado inválido'); return; }
-            const schedule = window.prompt('Horario (ej: "7:00 a 5:00"):', '7:00 a 5:00');
-            if (schedule === null) return;
-            const credit = window.prompt('Días de crédito al banco (default 1):', '1');
-            if (credit === null) return;
-            await api('POST', `/api/hr/holidays/${holidayId}/attendance`, {
-                employee_id: emp.id,
-                schedule_text: schedule,
-                days_credit: Number(credit) || 1
+            const data = await formDialog({
+                title: `Registrar asistencia · ${holidayName}`,
+                description: `Fecha: ${holidayDate}. Cada asistencia suma días al banco compensado del empleado.`,
+                fields: [
+                    { name: 'employee_id', label: 'Empleado', type: 'select', required: true,
+                      options: emps.map(e => ({ value: e.id, label: `${e.full_name} (${e.department_name || '-'})` })) },
+                    { name: 'schedule', label: 'Horario', type: 'text', default: '7:00 a 5:00',
+                      placeholder: 'Ej: 7:00 a 5:00' },
+                    { name: 'credit', label: 'Días de crédito al banco', type: 'number', default: '1' }
+                ],
+                confirmText: 'Registrar asistencia'
             });
-            Notification.success(`Asistencia registrada: ${emp.full_name} +${credit}d al banco`);
+            if (!data) return;
+            const empId = Number(data.employee_id);
+            const credit = Number(data.credit) || 1;
+            await api('POST', `/api/hr/holidays/${holidayId}/attendance`, {
+                employee_id: empId,
+                schedule_text: data.schedule || null,
+                days_credit: credit
+            });
+            const emp = emps.find(e => e.id === empId);
+            Notification.success(`+${credit}d al banco de ${emp ? emp.full_name : 'el empleado'}`);
         } catch (err) {
             Notification.error('No se pudo registrar: ' + err.message);
         }
@@ -377,13 +402,19 @@ const hrAdmin = (function () {
             const r = await api('GET', `/api/hr/holidays/${holidayId}/attendance`);
             const att = r.data.attendance || [];
             if (att.length === 0) {
-                window.alert(`Nadie registrado como trabajando "${holidayName}" aún.`);
+                await infoDialog({
+                    title: `Asistencia · ${holidayName}`,
+                    message: 'Nadie registrado como trabajando este feriado todavía.'
+                });
                 return;
             }
             const list = att.map(a =>
-                `  • ${a.employee_name} (${a.department_name || '-'}) — ${a.schedule_text || 'sin horario'} → +${a.days_credit}d`
+                `• ${a.employee_name} (${a.department_name || '-'}) — ${a.schedule_text || 'sin horario'} → +${a.days_credit}d`
             ).join('\n');
-            window.alert(`Trabajaron en "${holidayName}":\n\n${list}`);
+            await infoDialog({
+                title: `Trabajaron · ${holidayName}`,
+                message: list
+            });
         } catch (err) {
             Notification.error('Error: ' + err.message);
         }
@@ -434,46 +465,48 @@ const hrAdmin = (function () {
             const myEmployee = me.data.employee;
             const isAdmin = Auth.isAdmin();
 
-            let employeeId = null;
+            const fields = [];
             if (isAdmin) {
                 const emps = await getEmployees();
-                const list = emps.map((e, i) => `${i + 1}. ${e.full_name}`).join('\n');
-                const idx = window.prompt('Solicitar para qué empleado? (número, vacío = vos):\n' + list);
-                if (idx === null) return;
-                if (idx) {
-                    const emp = emps[Number(idx) - 1];
-                    if (!emp) { Notification.error('Empleado inválido'); return; }
-                    employeeId = emp.id;
-                }
+                const opts = [{ value: '', label: 'Para mí (admin)' }]
+                    .concat(emps.map(e => ({ value: e.id, label: `${e.full_name} (${e.department_name || '-'})` })));
+                fields.push({ name: 'employee_id', label: 'Empleado', type: 'select', options: opts });
             } else if (!myEmployee) {
                 Notification.error('No tenés perfil de empleado. Pedile a RRHH que te cree uno.');
                 return;
             }
-
-            const types = ['vacaciones', 'feriado_compensado', 'permiso_personal', 'enfermedad', 'otro'];
-            const typeIdx = window.prompt(
-                'Tipo de solicitud:\n' +
-                types.map((t, i) => `${i + 1}. ${t}`).join('\n')
+            fields.push(
+                { name: 'request_type', label: 'Tipo de solicitud', type: 'select', required: true,
+                  options: [
+                    { value: 'vacaciones',          label: 'Vacaciones' },
+                    { value: 'feriado_compensado',  label: 'Feriado compensado (descuenta del banco)' },
+                    { value: 'permiso_personal',    label: 'Permiso personal' },
+                    { value: 'enfermedad',          label: 'Enfermedad' },
+                    { value: 'otro',                label: 'Otro' }
+                  ] },
+                { name: 'date_from', label: 'Desde', type: 'date', required: true },
+                { name: 'date_to',   label: 'Hasta', type: 'date', required: true },
+                { name: 'days_count', label: 'Días totales', type: 'number', required: true, default: '1' },
+                { name: 'reason', label: 'Motivo', type: 'textarea', placeholder: 'Opcional' }
             );
-            const type = types[Number(typeIdx) - 1];
-            if (!type) return;
 
-            const dateFrom = window.prompt('Desde (YYYY-MM-DD):');
-            if (!dateFrom) return;
-            const dateTo = window.prompt('Hasta (YYYY-MM-DD):', dateFrom);
-            if (!dateTo) return;
-            const daysStr = window.prompt('Días totales:');
-            const days = Number(daysStr);
+            const data = await formDialog({
+                title: 'Nueva solicitud de tiempo libre',
+                fields,
+                confirmText: 'Crear solicitud'
+            });
+            if (!data) return;
+
+            const days = Number(data.days_count);
             if (!days || days <= 0) { Notification.error('Días inválido'); return; }
-            const reason = window.prompt('Motivo (opcional):') || null;
 
             await api('POST', '/api/hr/time-off', {
-                employee_id: employeeId,
-                request_type: type,
-                date_from: dateFrom,
-                date_to: dateTo,
+                employee_id: data.employee_id ? Number(data.employee_id) : null,
+                request_type: data.request_type,
+                date_from: data.date_from,
+                date_to: data.date_to,
                 days_count: days,
-                reason
+                reason: data.reason || null
             });
             Notification.success('Solicitud creada');
             loadTimeOff();
@@ -483,7 +516,13 @@ const hrAdmin = (function () {
     }
 
     async function approveTimeOff(id) {
-        if (!window.confirm('¿Aprobar esta solicitud? Si es feriado_compensado, descuenta del banco.')) return;
+        const ok = await confirmDialog({
+            title: '¿Aprobar esta solicitud?',
+            message: 'Si la solicitud es de tipo "feriado compensado", se descuenta automáticamente del banco del empleado.',
+            confirmText: 'Aprobar',
+            danger: false
+        });
+        if (!ok) return;
         try {
             await api('POST', `/api/hr/time-off/${id}/approve`);
             Notification.success('Solicitud aprobada');
@@ -494,10 +533,17 @@ const hrAdmin = (function () {
     }
 
     async function rejectTimeOff(id) {
-        const reason = window.prompt('Motivo del rechazo:');
-        if (reason === null) return;
+        const data = await formDialog({
+            title: 'Rechazar solicitud',
+            description: 'El empleado verá este motivo cuando consulte el estado.',
+            fields: [
+                { name: 'reason', label: 'Motivo del rechazo', type: 'textarea', required: true }
+            ],
+            confirmText: 'Rechazar solicitud'
+        });
+        if (!data) return;
         try {
-            await api('POST', `/api/hr/time-off/${id}/reject`, { reason });
+            await api('POST', `/api/hr/time-off/${id}/reject`, { reason: data.reason });
             Notification.success('Solicitud rechazada');
             loadTimeOff();
         } catch (err) {
@@ -506,7 +552,14 @@ const hrAdmin = (function () {
     }
 
     async function cancelTimeOff(id) {
-        if (!window.confirm('¿Cancelar esta solicitud?')) return;
+        const ok = await confirmDialog({
+            title: '¿Cancelar esta solicitud?',
+            message: 'La solicitud queda cancelada y no se procesa. Si era de feriado compensado, no se descuenta del banco.',
+            confirmText: 'Sí, cancelar',
+            cancelText: 'No',
+            danger: false
+        });
+        if (!ok) return;
         try {
             await api('POST', `/api/hr/time-off/${id}/cancel`);
             Notification.success('Solicitud cancelada');

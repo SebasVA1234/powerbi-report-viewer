@@ -53,9 +53,11 @@ const API = {
     },
 
     async changePassword(currentPassword, newPassword) {
+        // El backend usa snake_case (current_password / new_password) — antes
+        // se mandaba camelCase y silenciosamente fallaba.
         return this.request(API_ENDPOINTS.CHANGE_PASSWORD, {
             method: 'POST',
-            body: JSON.stringify({ currentPassword, newPassword })
+            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
         });
     },
 

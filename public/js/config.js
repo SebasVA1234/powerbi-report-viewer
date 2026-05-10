@@ -13,7 +13,7 @@ const API_ENDPOINTS = {
     LOGIN: '/auth/login',
     VERIFY: '/auth/verify',
     LOGOUT: '/auth/logout',
-    CHANGE_PASSWORD: '/auth/change-password',
+    CHANGE_PASSWORD: '/auth/change-my-password',
     
     // Users
     USERS: '/users',

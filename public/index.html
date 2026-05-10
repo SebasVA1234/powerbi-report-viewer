@@ -224,6 +224,32 @@
                                         <button type="submit" class="btn btn-primary">Guardar Cambios</button>
                                     </form>
                                 </div>
+                                <div class="profile-card-new">
+                                    <div class="profile-card-header">
+                                        <div class="profile-icon" style="background: var(--gradient-brand);">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                            </svg>
+                                        </div>
+                                        <h3>Cambiar contraseña</h3>
+                                    </div>
+                                    <form id="change-password-form" class="profile-form">
+                                        <div class="form-group">
+                                            <label>Contraseña actual</label>
+                                            <input type="password" id="profile-current-password" required autocomplete="current-password">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Nueva contraseña <small style="opacity:0.7;">(mín. 8 caracteres)</small></label>
+                                            <input type="password" id="profile-new-password" required minlength="8" autocomplete="new-password">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Repetí la nueva</label>
+                                            <input type="password" id="profile-new-password-2" required minlength="8" autocomplete="new-password">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Cambiar contraseña</button>
+                                    </form>
+                                </div>
                             </div>
                         </section>
 
@@ -866,15 +892,31 @@
                             <input type="email" name="email" required placeholder="correo@ecualand.ec">
                         </div>
                         <div class="form-group">
-                            <label>Contraseña</label>
+                            <label>Contraseña inicial <small style="opacity:0.7;">(el usuario la cambia en el primer login)</small></label>
                             <input type="password" name="password" required minlength="6" placeholder="Mínimo 6 caracteres">
                         </div>
                         <div class="form-group">
-                            <label>Rol</label>
+                            <label>Rol legacy <small style="opacity:0.7;">(admin = acceso total; usuario = se afina abajo)</small></label>
                             <select name="role" required>
                                 <option value="user">Usuario</option>
                                 <option value="admin">Administrador</option>
                             </select>
+                        </div>
+
+                        <hr style="margin: 1.25rem 0;">
+
+                        <div class="form-group">
+                            <label>Departamentos <small style="opacity:0.7;">(opcional · podés asignar varios)</small></label>
+                            <div id="create-user-departments-checks" style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; max-height:160px; overflow-y:auto;">
+                                <em style="color:var(--text-3); font-size:0.85rem;">Cargando…</em>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Roles del organigrama <small style="opacity:0.7;">(opcional · suma a los permisos del rol legacy)</small></label>
+                            <div id="create-user-roles-checks" style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; max-height:160px; overflow-y:auto;">
+                                <em style="color:var(--text-3); font-size:0.85rem;">Cargando…</em>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1276,6 +1318,7 @@
     <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/confirm-dialog.js"></script>
     <script src="js/windows.js"></script>
     <script src="js/dashboard.js"></script>
     <script src="js/documents.js"></script>
