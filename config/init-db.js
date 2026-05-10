@@ -134,6 +134,39 @@ async function migrateCategoriesFK() {
     }
 }
 
+// PR-0c: agrega documents.storage_key (path en el volumen) y permite que
+// file_data sea NULL. Idempotente. Los documentos legacy con BLOB siguen
+// funcionando: streamDocument hace fallback a file_data si storage_key
+// está vacío.
+async function migrateDocumentsStorageKey() {
+    if (db.driver === 'sqlite') {
+        const cols = await db.query("PRAGMA table_info(documents)");
+        if (!cols.some(c => c.name === 'storage_key')) {
+            await db.exec('ALTER TABLE documents ADD COLUMN storage_key TEXT');
+            console.log('🔧 Migración: columna storage_key añadida a documents');
+        }
+        // SQLite no permite cambiar NOT NULL→NULL sin recrear la tabla; lo
+        // dejamos: el schema legacy tenía file_data NOT NULL, pero los
+        // INSERTs nuevos pueden enviar null si la columna no fue declarada
+        // así. En la práctica, escribimos un Buffer vacío como sentinel
+        // cuando hay storage_key, así no rompemos el constraint.
+    } else {
+        const cols = await db.query(
+            "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'documents'"
+        );
+        const colNames = cols.map(c => c.column_name);
+        if (!colNames.includes('storage_key')) {
+            await db.exec('ALTER TABLE documents ADD COLUMN storage_key TEXT');
+            console.log('🔧 Migración: columna storage_key añadida a documents');
+        }
+        const fileDataCol = cols.find(c => c.column_name === 'file_data');
+        if (fileDataCol && fileDataCol.is_nullable === 'NO') {
+            await db.exec('ALTER TABLE documents ALTER COLUMN file_data DROP NOT NULL');
+            console.log('🔧 Migración: documents.file_data ahora permite NULL');
+        }
+    }
+}
+
 // PR-0b.1: agrega users.totp_secret y users.totp_enabled (2FA TOTP).
 // Idempotente: detecta el estado y aplica solo lo que falta.
 async function migrateUsersTotpFields() {
@@ -285,7 +318,10 @@ async function seedRbac() {
         ['hr.attendance.manage','hr',        'attendance.manage','Registrar asistencia a feriados (RRHH)'],
         // PR-3c: solicitudes de tiempo libre
         ['hr.timeoff.request', 'hr',         'timeoff.request',  'Solicitar días libres (cualquier empleado)'],
-        ['hr.timeoff.approve', 'hr',         'timeoff.approve',  'Aprobar/rechazar solicitudes (jefe / RRHH)']
+        ['hr.timeoff.approve', 'hr',         'timeoff.approve',  'Aprobar/rechazar solicitudes (jefe / RRHH)'],
+        // PR-3d: memos / comunicados
+        ['hr.memos.read',      'hr',         'memos.read',       'Leer los propios memos / comunicados'],
+        ['hr.memos.write',     'hr',         'memos.write',      'Emitir memos a empleados (RRHH/Gerencia)']
     ];
     for (const [code, resource_type, action, description] of PERMS) {
         await db.execute(
@@ -360,22 +396,27 @@ async function seedRbac() {
         'audit.read',
         'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage',
         'hr.holidays.manage', 'hr.attendance.manage',  // PR-3b
-        'hr.timeoff.approve'                            // PR-3c
+        'hr.timeoff.approve',                           // PR-3c
+        'hr.memos.read', 'hr.memos.write'               // PR-3d
     ]);
 
     // PR-3a: jefes ven a su equipo en RRHH. PR-3c: aprueban time-off de su equipo.
+    // PR-3d: jefes pueden emitir memos a su equipo y leer los suyos.
     for (const j of ['jefe_compras','jefe_ventas','jefe_contabilidad','jefe_marketing']) {
         await grantPermsToRole(j, [
             'hr.read.team', 'hr.read.own',
-            'hr.timeoff.request', 'hr.timeoff.approve'
+            'hr.timeoff.request', 'hr.timeoff.approve',
+            'hr.memos.read', 'hr.memos.write'
         ]);
     }
 
-    // Empleado: lo mínimo + ver su propio perfil RRHH + solicitar días libres.
+    // Empleado: lo mínimo + ver su propio perfil RRHH + solicitar días libres
+    // + leer memos dirigidos a él (PR-3d).
     await grantPermsToRole('empleado', [
         'reports.read.assigned', 'documents.read.assigned',
         'hr.read.own',
-        'hr.timeoff.request'
+        'hr.timeoff.request',
+        'hr.memos.read'
     ]);
 
     // -------- Asignar admin del sistema al user admin (id=1) --------
@@ -580,6 +621,7 @@ async function init() {
     await migrateAccessLogsDocCol();
     await migrateUsersAuthFields();
     await migrateUsersTotpFields();
+    await migrateDocumentsStorageKey();
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();

@@ -11,6 +11,10 @@ database/*.db
 database/*.db-shm
 database/*.db-wal
 
+# PR-0c: directorio de documentos en local (se monta como volumen en Railway).
+# Nunca debe commitear PDFs ni la SQLite de smoke testing.
+data/
+
 # Logs
 *.log
 logs/

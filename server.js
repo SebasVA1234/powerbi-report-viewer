@@ -17,6 +17,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === JWT_DEFAULT || process
 // La inicialización de la DB se hace al final, antes de app.listen() —
 // es async ahora porque la capa de DB soporta SQLite y PostgreSQL.
 const { init: initDb } = require('./config/init-db');
+const storage = require('./config/storage');
 
 // Importar rutas
 const authRoutes = require('./routes/auth.routes');
@@ -54,7 +55,9 @@ app.use(helmet({
         useDefaults: false,
         directives: {
             'default-src': ["'self'"],
-            'script-src': ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            // PR-0c: PDF.js ahora se sirve local (/vendor/pdfjs/*) desde
+            // node_modules/pdfjs-dist; ya no necesitamos cdnjs.cloudflare.com.
+            'script-src': ["'self'", "'unsafe-inline'"],
             // PR-2a: permitir Google Fonts (Inter) para el design system antigravity.
             'style-src':  ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             'font-src':   ["'self'", "data:", "https://fonts.gstatic.com"],
@@ -120,6 +123,17 @@ app.use('/api/auth/login', loginLimiter);
 // Servir archivos estáticos (el frontend)
 app.use(express.static(path.join(__dirname, 'public')));
 
+// PR-0c: servir PDF.js v4 local (ESM + worker) desde node_modules/pdfjs-dist.
+// Cache largo + immutable porque la URL contiene el path versionado por npm.
+app.use('/vendor/pdfjs', express.static(
+    path.join(__dirname, 'node_modules', 'pdfjs-dist', 'legacy', 'build'),
+    { maxAge: '7d', immutable: true }
+));
+app.use('/vendor/pdfjs/cmaps', express.static(
+    path.join(__dirname, 'node_modules', 'pdfjs-dist', 'cmaps'),
+    { maxAge: '7d', immutable: true }
+));
+
 // =============================================
 // HEALTH CHECK - Para Railway
 // =============================================
@@ -169,6 +183,9 @@ app.use((err, req, res, next) => {
 (async () => {
     try {
         await initDb();
+        // PR-0c: asegurar que el dir de documentos existe (./data/documents
+        // local, /app/data/documents en Railway con DOCUMENTS_DIR seteado).
+        storage.ensureDocumentsDir();
     } catch (err) {
         console.error('❌ Error inicializando la base de datos:', err);
         process.exit(1);

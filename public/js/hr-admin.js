@@ -82,6 +82,7 @@ const hrAdmin = (function () {
                 if (tab === 'employees') loadEmployees();
                 if (tab === 'holidays') loadHolidays();
                 if (tab === 'time-off') loadTimeOff();
+                if (tab === 'memos') loadMemos();
             });
         });
     }
@@ -515,6 +516,199 @@ const hrAdmin = (function () {
         }
     }
 
+    // ------------------------------------------------------------
+    // Tab: Memos / Comunicados (PR-3d)
+    // ------------------------------------------------------------
+    let _memosView = 'inbox'; // 'inbox' | 'sent'
+    let _currentMemoId = null;
+
+    function highlightMemosToggle() {
+        const inbox = document.getElementById('hr-memos-btn-inbox');
+        const sent  = document.getElementById('hr-memos-btn-sent');
+        if (inbox) inbox.classList.toggle('btn-primary', _memosView === 'inbox');
+        if (sent)  sent.classList.toggle('btn-primary',  _memosView === 'sent');
+    }
+
+    async function switchMemosView(view) {
+        _memosView = view === 'sent' ? 'sent' : 'inbox';
+        highlightMemosToggle();
+        await loadMemos();
+    }
+
+    async function loadMemos() {
+        const tbody = document.getElementById('hr-memos-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">Cargando...</td></tr>';
+        highlightMemosToggle();
+        try {
+            const url = _memosView === 'sent' ? '/api/hr/memos/sent' : '/api/hr/memos/inbox';
+            const r = await api('GET', url);
+            const memos = r.data.memos || [];
+            if (memos.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="empty">Sin memos en ${_memosView === 'sent' ? 'enviados' : 'tu bandeja'}.</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = memos.map(m => {
+                const target = m.target_type === 'all' ? 'Toda la empresa'
+                              : m.target_type === 'department' ? `Depto #${m.target_id}`
+                              : `Empleado #${m.target_id}`;
+                const sentInfo = _memosView === 'sent'
+                    ? `${target}<br><small>${m.ack_count || 0} acuse${(m.ack_count || 0) !== 1 ? 's' : ''}</small>`
+                    : `${target}<br><small>De: ${escapeHtml(m.issued_by_full_name || m.issued_by_username || '-')}</small>`;
+                const sevBadge = m.severity === 'sanction' ? 'badge-danger'
+                                : m.severity === 'warning' ? 'badge-warning'
+                                : 'badge-info';
+                const stateBadge = _memosView === 'sent'
+                    ? (m.superseded_by ? '<span class="badge badge-warning">Reemplazado</span>'
+                                       : '<span class="badge badge-success">Vigente</span>')
+                    : (m.acknowledged ? '<span class="badge badge-success">Acusado</span>'
+                                      : '<span class="badge badge-info">Sin acuse</span>');
+                return `
+                    <tr>
+                        <td><strong>${escapeHtml(m.subject)}</strong></td>
+                        <td>${escapeHtml(m.target_type)}</td>
+                        <td>${sentInfo}</td>
+                        <td><span class="badge ${sevBadge}">${escapeHtml(m.severity)}</span></td>
+                        <td>${escapeHtml(fmtDate(m.issued_at))}</td>
+                        <td>${stateBadge}</td>
+                        <td>
+                            <button class="btn-edit" onclick="hrAdmin.viewMemo(${m.id})">Ver</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+
+    async function viewMemo(id) {
+        try {
+            const r = await api('GET', `/api/hr/memos/${id}`);
+            const m = r.data.memo;
+            const integrity = r.data.content_integrity;
+            const myAck = r.data.my_ack;
+            const acks = r.data.acknowledgments;
+            _currentMemoId = id;
+
+            document.getElementById('hr-memo-view-subject').textContent = m.subject;
+            document.getElementById('hr-memo-view-content').textContent = m.content;
+
+            const meta = document.getElementById('hr-memo-view-meta');
+            meta.innerHTML = `
+                <p><strong>De:</strong> ${escapeHtml(m.issued_by_full_name || m.issued_by_username || '-')}</p>
+                <p><strong>Para:</strong> ${escapeHtml(m.target_name || m.target_type)}</p>
+                <p><strong>Severidad:</strong> ${escapeHtml(m.severity)}</p>
+                <p><strong>Emitido:</strong> ${escapeHtml(fmtDate(m.issued_at))}</p>
+                ${m.superseded_by ? `<p><strong style="color:#f59e0b">Reemplazado por memo #${m.superseded_by}</strong></p>` : ''}
+                <p><small><strong>SHA-256:</strong> <code>${escapeHtml(m.content_hash)}</code></small></p>
+            `;
+
+            const integEl = document.getElementById('hr-memo-view-integrity');
+            integEl.innerHTML = integrity
+                ? '<p style="color:#10b981;">✓ Integridad verificada — el contenido coincide con el hash original.</p>'
+                : '<p style="color:#ef4444;"><strong>⚠ ALERTA:</strong> el hash NO coincide con el contenido. El memo fue alterado en la base de datos.</p>';
+
+            const acksEl = document.getElementById('hr-memo-view-acks');
+            if (acks && acks.length > 0) {
+                acksEl.innerHTML = '<h5 style="margin-top:1rem;">Acuses de recibo</h5><ul>' +
+                    acks.map(a => `<li>${escapeHtml(a.full_name || a.username)} — ${escapeHtml(fmtDate(a.acknowledged_at))} (${escapeHtml(a.ip_address || '-')})</li>`).join('') +
+                    '</ul>';
+            } else if (acks) {
+                acksEl.innerHTML = '<p class="empty-inline">Sin acuses todavía.</p>';
+            } else {
+                acksEl.innerHTML = '';
+            }
+
+            const ackBtn = document.getElementById('hr-memo-view-ack-btn');
+            if (myAck) {
+                ackBtn.style.display = 'none';
+            } else {
+                ackBtn.style.display = '';
+                ackBtn.disabled = false;
+                ackBtn.textContent = 'Acusar recibo';
+            }
+
+            document.getElementById('hr-memo-view-modal').classList.add('active');
+        } catch (err) {
+            Notification.error('No se pudo abrir: ' + err.message);
+        }
+    }
+
+    async function ackCurrentMemo() {
+        if (!_currentMemoId) return;
+        const btn = document.getElementById('hr-memo-view-ack-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Registrando...'; }
+        try {
+            await api('POST', `/api/hr/memos/${_currentMemoId}/ack`);
+            Notification.success('Acuse registrado');
+            btn.style.display = 'none';
+            await loadMemos();
+        } catch (err) {
+            Notification.error('No se pudo acusar: ' + err.message);
+            if (btn) { btn.disabled = false; btn.textContent = 'Acusar recibo'; }
+        }
+    }
+
+    async function openCreateMemo() {
+        try {
+            // Cargar empleados + departamentos para los selects.
+            const [emps, depts] = await Promise.all([getEmployees(), getDepartments()]);
+            const empSel  = document.getElementById('hr-memo-target-employee');
+            const deptSel = document.getElementById('hr-memo-target-department');
+            empSel.innerHTML  = emps.map(e => `<option value="${e.id}">${escapeHtml(e.full_name)} (${escapeHtml(e.department_name || '-')})</option>`).join('');
+            deptSel.innerHTML = depts.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+
+            // Reset form.
+            document.getElementById('hr-memo-create-form').reset();
+            document.getElementById('hr-memo-target-type').value = 'employee';
+            onMemoTargetTypeChange();
+
+            document.getElementById('hr-memo-create-modal').classList.add('active');
+        } catch (err) {
+            Notification.error('No se pudo abrir el formulario: ' + err.message);
+        }
+    }
+
+    function onMemoTargetTypeChange() {
+        const type = document.getElementById('hr-memo-target-type').value;
+        document.getElementById('hr-memo-target-employee-row').style.display   = type === 'employee'   ? '' : 'none';
+        document.getElementById('hr-memo-target-department-row').style.display = type === 'department' ? '' : 'none';
+    }
+
+    async function submitCreateMemo(e) {
+        e.preventDefault();
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Emitiendo...'; }
+        try {
+            const target_type = document.getElementById('hr-memo-target-type').value;
+            let target_id = null;
+            if (target_type === 'employee')   target_id = Number(document.getElementById('hr-memo-target-employee').value);
+            if (target_type === 'department') target_id = Number(document.getElementById('hr-memo-target-department').value);
+
+            const body = {
+                subject: document.getElementById('hr-memo-subject').value.trim(),
+                content: document.getElementById('hr-memo-content').value,
+                target_type,
+                target_id,
+                severity: document.getElementById('hr-memo-severity').value
+            };
+            await api('POST', '/api/hr/memos', body);
+            Notification.success('Memo emitido');
+            document.getElementById('hr-memo-create-modal').classList.remove('active');
+            _memosView = 'sent';
+            await loadMemos();
+        } catch (err) {
+            Notification.error('No se pudo emitir: ' + err.message);
+        } finally {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Emitir Memo'; }
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const f = document.getElementById('hr-memo-create-form');
+        if (f) f.addEventListener('submit', submitCreateMemo);
+    });
+
     // Inicializar listeners de tabs cuando el DOM está listo.
     document.addEventListener('DOMContentLoaded', setupTabs);
 
@@ -524,6 +718,9 @@ const hrAdmin = (function () {
         loadHolidays, openCreateHoliday, deleteHoliday,
             openRegisterAttendance, viewAttendance,
         loadTimeOff, openCreateTimeOff,
-            approveTimeOff, rejectTimeOff, cancelTimeOff
+            approveTimeOff, rejectTimeOff, cancelTimeOff,
+        // PR-3d Memos
+        loadMemos, switchMemosView, openCreateMemo, viewMemo, ackCurrentMemo,
+            onMemoTargetTypeChange
     };
 })();

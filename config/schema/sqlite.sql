@@ -465,3 +465,46 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
 CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
 CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);
+
+-- ============================================================
+-- PR-3d: MEMOS / COMUNICADOS A EMPLEADOS (historial inmutable)
+-- ============================================================
+-- Modelo append-only: una vez emitido, el memo nunca se edita ni borra.
+-- Si necesita corrección, se crea un memo nuevo y se setea
+-- superseded_by sobre el original (que sigue visible para auditoría).
+-- content_hash es SHA-256(subject + '\n' + content) calculado al INSERT;
+-- si alguien tocara content directo en la DB, hash no cuadraría → tamper.
+-- target_type:
+--   'employee'    → target_id es hr_employees.id (memo personal)
+--   'department'  → target_id es departments.id (broadcast a un area)
+--   'all'         → target_id NULL (broadcast a toda la empresa)
+-- severity: info | warning | sanction (para amonestaciones formales).
+-- hr_memo_acknowledgments registra el acuse de lectura (timestamp + ip).
+CREATE TABLE IF NOT EXISTS hr_memos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK(target_type IN ('employee','department','all')),
+    target_id INTEGER,
+    severity TEXT NOT NULL DEFAULT 'info' CHECK(severity IN ('info','warning','sanction')),
+    issued_by INTEGER NOT NULL,
+    issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    superseded_by INTEGER,
+    FOREIGN KEY (issued_by) REFERENCES users (id),
+    FOREIGN KEY (superseded_by) REFERENCES hr_memos (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS hr_memo_acknowledgments (
+    memo_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    acknowledged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ip_address TEXT,
+    PRIMARY KEY (memo_id, user_id),
+    FOREIGN KEY (memo_id) REFERENCES hr_memos (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_memos_target ON hr_memos(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_hr_memos_issued ON hr_memos(issued_at);
+CREATE INDEX IF NOT EXISTS idx_hr_memo_acks_user ON hr_memo_acknowledgments(user_id);

@@ -145,10 +145,31 @@ function escapeHtml(s) {
 
 // ---------- Visor de PDF seguro ----------
 
+// Espera a que pdfjsLib esté disponible. El <script type="module"> de
+// index.html lo expone async; si openDocument se invoca antes (en un
+// click muy rápido tras cargar la página), reintentamos con backoff.
+function waitForPdfJs(timeoutMs = 5000) {
+    if (window['pdfjsLib']) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const start = Date.now();
+        const onReady = () => { cleanup(); resolve(); };
+        const tick = () => {
+            if (window['pdfjsLib']) { cleanup(); resolve(); return; }
+            if (Date.now() - start > timeoutMs) { cleanup(); reject(new Error('PDF.js no cargó')); return; }
+            setTimeout(tick, 100);
+        };
+        const cleanup = () => window.removeEventListener('pdfjs-ready', onReady);
+        window.addEventListener('pdfjs-ready', onReady, { once: true });
+        tick();
+    });
+}
+
 async function openDocument(documentId) {
     try {
-        if (!window['pdfjsLib']) {
-            Notification.error('No se pudo cargar el visor. Revise su conexión a internet.');
+        try {
+            await waitForPdfJs();
+        } catch {
+            Notification.error('No se pudo cargar el visor de PDFs.');
             return;
         }
 

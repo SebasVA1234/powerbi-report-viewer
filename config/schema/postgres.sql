@@ -410,3 +410,38 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
 CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
 CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);
+
+-- ============================================================
+-- PR-3d: MEMOS / COMUNICADOS A EMPLEADOS (historial inmutable)
+-- ============================================================
+-- Append-only: nunca se editan ni borran. content_hash es SHA-256 del
+-- subject+content; cualquier modificación directa en DB lo rompe.
+-- target_type = 'employee'|'department'|'all' resuelve a target_id.
+CREATE TABLE IF NOT EXISTS hr_memos (
+    id SERIAL PRIMARY KEY,
+    subject TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK(target_type IN ('employee','department','all')),
+    target_id INTEGER,
+    severity TEXT NOT NULL DEFAULT 'info' CHECK(severity IN ('info','warning','sanction')),
+    issued_by INTEGER NOT NULL,
+    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    superseded_by INTEGER,
+    FOREIGN KEY (issued_by) REFERENCES users (id),
+    FOREIGN KEY (superseded_by) REFERENCES hr_memos (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS hr_memo_acknowledgments (
+    memo_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    acknowledged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ip_address TEXT,
+    PRIMARY KEY (memo_id, user_id),
+    FOREIGN KEY (memo_id) REFERENCES hr_memos (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_memos_target ON hr_memos(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_hr_memos_issued ON hr_memos(issued_at);
+CREATE INDEX IF NOT EXISTS idx_hr_memo_acks_user ON hr_memo_acknowledgments(user_id);
