@@ -1130,3 +1130,193 @@ input[type="file"]::file-selector-button:hover {
 .confirm-dialog .btn-confirm-confirm:hover:not(:disabled) {
     filter: brightness(1.1);
 }
+
+/* ============================================================
+   COTIZADOR · overrides agresivos sobre cotizador.css legacy
+   ============================================================
+   La hoja cotizador.css fue escrita para tema claro (#fff, #111827).
+   Acá se pisa cada selector específico con tokens dark del design
+   system para que el cotizador tenga el mismo look que el resto.
+   ============================================================ */
+
+/* Card "Resultado" (panel derecho) */
+.cotizador-resultado {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    color: var(--text-1) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+.cotizador-resultado h3 {
+    color: var(--text-1) !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.6rem;
+    margin-bottom: 1rem !important;
+}
+.cotizador-resultado .empty {
+    color: var(--text-3) !important;
+    font-style: italic;
+    text-align: center;
+    padding: 4rem 0 !important;
+}
+
+/* Meta grid (tallos, cajas, kilos, tarifa flete, destino, fecha) */
+.cot-meta-item {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--text-1) !important;
+}
+.cot-meta-item .label {
+    color: var(--text-3) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.7rem !important;
+    font-weight: 600;
+}
+.cot-meta-item .value {
+    color: var(--text-1) !important;
+    font-weight: 700 !important;
+}
+
+/* Escenarios (E1 verde, E2 violeta) */
+.cot-escenario {
+    border: 1px solid var(--border) !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-radius: var(--radius-md) !important;
+}
+.cot-escenario .head {
+    color: white !important;
+    padding: 0.75rem 1rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.01em;
+}
+.cot-escenario.e1 .head {
+    background: linear-gradient(135deg, var(--accent), #059669) !important;
+}
+.cot-escenario.e2 .head {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark)) !important;
+}
+.cot-escenario .body {
+    color: var(--text-1) !important;
+    padding: 1rem 1.1rem !important;
+}
+.cot-escenario .row .lbl { color: var(--text-2) !important; }
+.cot-escenario .row .val { color: var(--text-1) !important; }
+.cot-escenario .row.total {
+    border-top: 1px solid var(--border) !important;
+    color: var(--text-1) !important;
+}
+.cot-landed {
+    background: rgba(245, 158, 11, 0.12) !important;
+    color: var(--warn) !important;
+    border-top: 1px solid rgba(245, 158, 11, 0.2) !important;
+    font-weight: 700 !important;
+}
+
+/* Histórico de cotizaciones */
+.cotizador-historico-wrap {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: 1.25rem 1.5rem !important;
+    box-shadow: var(--shadow-md) !important;
+}
+.cotizador-historico-wrap .reports-section-header {
+    border-bottom: 1px solid var(--border) !important;
+    padding-bottom: 0.75rem !important;
+    margin-bottom: 1rem !important;
+}
+.cotizador-historico-wrap .reports-section-header h3 {
+    color: var(--text-1) !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+}
+
+.cot-hist-table {
+    width: 100%;
+    background: transparent !important;
+    color: var(--text-2) !important;
+}
+.cot-hist-table th {
+    color: var(--text-3) !important;
+    background: rgba(0, 0, 0, 0.2) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+    font-size: 0.72rem !important;
+    font-weight: 700 !important;
+    padding: 0.85rem 1rem !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+.cot-hist-table td {
+    color: var(--text-2) !important;
+    padding: 0.85rem 1rem !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+.cot-hist-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02) !important;
+}
+.cot-hist-empty {
+    color: var(--text-3) !important;
+    padding: 2.5rem 1rem !important;
+    text-align: center;
+    font-style: italic;
+}
+
+/* La form del cotizador hereda .card → asegurarse que tenga el dark */
+.cotizador-form.card,
+.cotizador-form {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    color: var(--text-1) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+.cotizador-form h3 {
+    color: var(--text-1) !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.6rem;
+    margin-bottom: 1rem !important;
+}
+
+/* reports-section-header generico (también lo usa Documentos / sección reports) */
+.reports-section-header h2,
+.reports-section-header h3 {
+    color: var(--text-1) !important;
+    font-weight: 700 !important;
+}
+
+/* Profile card — el legacy styles.css le pone background: #ffffff a la
+   card, gray-50 a la barra del header y color: #111827 al h3. Pisamos
+   los tres con specificity #profile-section > clase. */
+#profile-section .profile-card-new {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+}
+#profile-section .profile-card-header {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+#profile-section .profile-card-header h3 {
+    color: var(--text-1) !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+}
+#profile-section .profile-form {
+    background: transparent !important;
+}
+
+/* Categorías icon badges en cards de Inicio (los pequeños como CARGA / COMPRAS) */
+.report-category {
+    background: rgba(0, 0, 0, 0.4) !important;
+    color: var(--text-1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}

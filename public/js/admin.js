@@ -62,11 +62,16 @@ function setupAdminTabs() {
 }
 
 // Load Users
+// IMPORTANTE: pedimos limit=500 para evitar el bug de paginación que ocultaba
+// al admin original. El endpoint /api/users paginaba a 10 y ORDER BY
+// created_at DESC, así que el admin (id=1, el más viejo) se caía a la pág 2
+// cuando había 11+ users — y la UI no tenía paginación, así que parecía
+// "fantasma" (logueado pero invisible en el listado).
 async function loadUsers() {
     const tbody = document.getElementById('users-table-body');
     try {
         tbody.innerHTML = '<tr><td colspan="6" class="loading">Cargando usuarios...</td></tr>';
-        const response = await API.getUsers();
+        const response = await API.getUsers({ limit: 500 });
         if (response.success) {
             currentUsers = response.data.users;
             displayUsers(currentUsers);
