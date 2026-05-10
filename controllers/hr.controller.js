@@ -736,6 +736,35 @@ class HrController {
         }
     }
 
+    // Hard-delete de un empleado. Cascadea (FK ON DELETE CASCADE):
+    //   - hr_documents.employee_id
+    //   - holiday_attendance.employee_id
+    //   - time_off_requests.employee_id
+    // Reportes directos quedan con manager_id=NULL (ON DELETE SET NULL).
+    // Si el empleado tiene user vinculado, el user NO se borra: solo se
+    // desvincula (hr_employees.user_id quedaba en SET NULL pero como
+    // borramos el empleado, queda sin efecto). Usalo solo para datos
+    // de prueba o errores de carga; para bajas reales preferí status='terminated'.
+    static async deleteEmployee(req, res) {
+        try {
+            const { id } = req.params;
+            const employee = await db.queryOne(
+                'SELECT id, full_name FROM hr_employees WHERE id = ?', [id]
+            );
+            if (!employee) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            await db.execute('DELETE FROM hr_employees WHERE id = ?', [id]);
+            res.json({
+                success: true,
+                message: `Empleado "${employee.full_name}" eliminado (con sus asistencias y solicitudes)`
+            });
+        } catch (err) {
+            console.error('deleteEmployee:', err);
+            res.status(500).json({ success: false, message: 'Error al eliminar empleado' });
+        }
+    }
+
     static async updateEmployee(req, res) {
         try {
             const { id } = req.params;

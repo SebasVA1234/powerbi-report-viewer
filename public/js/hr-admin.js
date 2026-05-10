@@ -178,6 +178,7 @@ const hrAdmin = (function () {
                     <td>
                         <button class="btn-edit" onclick="hrAdmin.editEmployee(${e.id})">Editar</button>
                         <button class="btn-edit" onclick="hrAdmin.viewBalance(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Saldo</button>
+                        <button class="btn-delete" onclick="hrAdmin.deleteEmployee(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Eliminar</button>
                     </td>
                 </tr>
             `).join('');
@@ -237,6 +238,28 @@ const hrAdmin = (function () {
             loadEmployees();
         } catch (err) {
             Notification.error('No se pudo actualizar: ' + err.message);
+        }
+    }
+
+    async function deleteEmployee(id, name) {
+        const confirm1 = window.confirm(
+            `¿Eliminar definitivamente a "${name}"?\n\n` +
+            `Se borran TAMBIÉN sus asistencias a feriados y solicitudes de tiempo libre.\n` +
+            `Si solo querés darle de baja, mejor editá el estado a "terminated".`
+        );
+        if (!confirm1) return;
+        const typed = window.prompt(`Para confirmar, escribí: ELIMINAR`);
+        if (typed !== 'ELIMINAR') {
+            Notification.info('Cancelado.');
+            return;
+        }
+        try {
+            await api('DELETE', `/api/hr/employees/${id}`);
+            Notification.success(`"${name}" eliminado`);
+            invalidateEmployeesCache();
+            loadEmployees();
+        } catch (err) {
+            Notification.error('No se pudo eliminar: ' + err.message);
         }
     }
 
@@ -497,7 +520,7 @@ const hrAdmin = (function () {
 
     return {
         loadMe,
-        loadEmployees, openCreateEmployee, editEmployee, viewBalance,
+        loadEmployees, openCreateEmployee, editEmployee, deleteEmployee, viewBalance,
         loadHolidays, openCreateHoliday, deleteHoliday,
             openRegisterAttendance, viewAttendance,
         loadTimeOff, openCreateTimeOff,
