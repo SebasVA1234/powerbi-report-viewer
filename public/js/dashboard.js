@@ -252,6 +252,10 @@ function showSection(sectionName) {
                 break;
             case 'profile': loadProfileData(); break;
             case 'admin': if (Auth.isAdmin()) initializeAdminSection(); break;
+            // PR-3a-ui: sección RRHH carga el tab "Mi Perfil" por default.
+            case 'hr':
+                if (typeof hrAdmin !== 'undefined') hrAdmin.loadMe();
+                break;
         }
     }
 }
