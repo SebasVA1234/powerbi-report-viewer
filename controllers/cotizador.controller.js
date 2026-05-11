@@ -716,7 +716,8 @@ exports.listarCotizaciones = async (req, res) => {
         let rows;
         if (isAdmin) {
             rows = await db.query(
-                `SELECT c.id, c.user_id, u.username, c.fecha_proyeccion, c.snapshot, c.created_at
+                `SELECT c.id, c.user_id, u.username, u.full_name AS user_full_name,
+                        c.fecha_proyeccion, c.snapshot, c.created_at
                  FROM cotizaciones_historico c
                  LEFT JOIN users u ON c.user_id = u.id
                  ORDER BY c.created_at DESC
@@ -725,12 +726,13 @@ exports.listarCotizaciones = async (req, res) => {
             );
         } else {
             rows = await db.query(
-                `SELECT c.id, c.user_id, ? as username, c.fecha_proyeccion, c.snapshot, c.created_at
+                `SELECT c.id, c.user_id, ? as username, ? as user_full_name,
+                        c.fecha_proyeccion, c.snapshot, c.created_at
                  FROM cotizaciones_historico c
                  WHERE c.user_id = ?
                  ORDER BY c.created_at DESC
                  LIMIT ?`,
-                [req.user.username, userId, parseInt(limit, 10)]
+                [req.user.username, req.user.full_name || req.user.username, userId, parseInt(limit, 10)]
             );
         }
         const items = rows.map(r => ({

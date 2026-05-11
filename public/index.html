@@ -495,6 +495,7 @@
                                 </div>
                                 <div class="cotizador-mode-toggle" id="cotizador-mode-toggle">
                                     <button class="cot-mode-btn active" data-mode="calcular">Calcular</button>
+                                    <button class="cot-mode-btn" data-mode="historial">📜 Historial</button>
                                     <button class="cot-mode-btn" data-mode="configurar" id="cot-mode-config-btn" style="display:none;">⚙️ Configurar tarifas</button>
                                 </div>
                             </div>
@@ -628,6 +629,53 @@
                                         <button class="btn btn-outline" type="button" onclick="loadCotizacionesHistorico()">Actualizar</button>
                                     </div>
                                     <div id="cotizador-historico"></div>
+                                </div>
+                            </div>
+
+                            <!-- Modo Historial · PR-5d -->
+                            <div id="cot-mode-historial" class="cot-mode-pane">
+                                <div class="cot-historial-layout">
+                                    <!-- Listado principal -->
+                                    <div class="cot-historial-main card">
+                                        <div class="cot-historial-toolbar">
+                                            <div class="cot-hist-search">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                                                <input type="text" id="cot-hist-filter-search" placeholder="Buscar por destino, ciudad, usuario, carguera...">
+                                            </div>
+                                            <select id="cot-hist-filter-carguera"><option value="">Todas las cargueras</option></select>
+                                            <input type="date" id="cot-hist-filter-from" title="Desde">
+                                            <input type="date" id="cot-hist-filter-to" title="Hasta">
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="cotHistFilter()">Limpiar</button>
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="cotHistReload()">Actualizar</button>
+                                        </div>
+                                        <div class="cot-historial-table-wrap">
+                                            <table class="data-table cot-historial-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Fecha</th>
+                                                        <th>Usuario</th>
+                                                        <th>Ruta</th>
+                                                        <th>Carguera</th>
+                                                        <th>Tallos</th>
+                                                        <th>Landed bajo</th>
+                                                        <th>Landed alto</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="cot-historial-tbody">
+                                                    <tr><td colspan="7" class="loading">Cargando histórico…</td></tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <!-- Panel lateral con detalle -->
+                                    <aside id="cot-historial-aside" class="cot-historial-aside card">
+                                        <div class="cot-hist-aside-empty">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                            <p>Click en una cotización para ver el detalle completo.</p>
+                                            <p class="cot-hist-aside-sub">Los snapshots son inmutables — son el registro histórico de cada decisión comercial.</p>
+                                        </div>
+                                    </aside>
                                 </div>
                             </div>
 

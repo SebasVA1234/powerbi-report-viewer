@@ -669,6 +669,207 @@
         if (mode === 'configurar' && typeof cotizadorAdmin !== 'undefined') {
             cotizadorAdmin.init();
         }
+        if (mode === 'historial') {
+            cotHistInit();
+        }
+    }
+
+    // ====================================================================
+    // PR-5d · Historial dedicado
+    // ====================================================================
+    let _historialAll = [];          // cache de la última carga
+    let _historialFiltered = [];     // resultado de aplicar filtros
+    let _historialSelectedId = null; // fila actualmente desplegada en aside
+
+    async function cotHistInit() {
+        await cotHistReload();
+        // Wire de los inputs de filtro (idempotente)
+        const ids = ['cot-hist-filter-search', 'cot-hist-filter-carguera',
+                     'cot-hist-filter-from', 'cot-hist-filter-to'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el._wired) {
+                el.addEventListener('input', cotHistApplyFilters);
+                el.addEventListener('change', cotHistApplyFilters);
+                el._wired = true;
+            }
+        });
+    }
+
+    async function cotHistReload() {
+        const tbody = document.getElementById('cot-historial-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="loading">Cargando histórico…</td></tr>';
+        try {
+            const r = await fetch('/api/cotizador/cotizaciones?limit=200', {
+                headers: { Authorization: 'Bearer ' + Utils.getToken() }
+            });
+            const j = await r.json();
+            _historialAll = (j && j.data) || [];
+            // Hidratar dropdown de cargueras desde los datos cargados
+            const cargSet = new Set();
+            _historialAll.forEach(c => {
+                const snap = parseSnapshot(c);
+                const carg = snap && snap.metadata && snap.metadata.carguera_nombre;
+                if (carg) cargSet.add(carg);
+            });
+            const sel = document.getElementById('cot-hist-filter-carguera');
+            if (sel && !sel.dataset.populated) {
+                Array.from(cargSet).sort().forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name; opt.textContent = name;
+                    sel.appendChild(opt);
+                });
+                sel.dataset.populated = '1';
+            }
+            cotHistApplyFilters();
+        } catch (err) {
+            if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(err.message || 'Error al cargar')}</td></tr>`;
+        }
+    }
+
+    function parseSnapshot(row) {
+        if (!row) return null;
+        if (row.snapshot && typeof row.snapshot === 'object') return row.snapshot;
+        if (typeof row.snapshot === 'string') {
+            try { return JSON.parse(row.snapshot); } catch { return null; }
+        }
+        // Algunos endpoints aplanan el snapshot — buscamos metadata directo en row
+        if (row.metadata) return row;
+        return null;
+    }
+
+    function cotHistApplyFilters() {
+        const q = (document.getElementById('cot-hist-filter-search')?.value || '').toLowerCase().trim();
+        const carg = document.getElementById('cot-hist-filter-carguera')?.value || '';
+        const from = document.getElementById('cot-hist-filter-from')?.value || '';
+        const to   = document.getElementById('cot-hist-filter-to')?.value || '';
+
+        _historialFiltered = _historialAll.filter(row => {
+            const snap = parseSnapshot(row);
+            if (!snap || !snap.metadata) return false;
+            const m = snap.metadata;
+            const fecha = (row.fecha_proyeccion || row.created_at || '').substring(0, 10);
+            if (from && fecha < from) return false;
+            if (to   && fecha > to)   return false;
+            if (carg && m.carguera_nombre !== carg) return false;
+            if (q) {
+                const hay = `${m.destino?.iata || ''} ${m.destino?.ciudad || ''} ${m.destino?.pais || ''} ${m.origen?.iata || ''} ${m.carguera_nombre || ''} ${m.aerolinea_nombre || ''} ${row.user_full_name || ''}`.toLowerCase();
+                if (!hay.includes(q)) return false;
+            }
+            return true;
+        });
+        cotHistRenderTable();
+    }
+
+    function cotHistRenderTable() {
+        const tbody = document.getElementById('cot-historial-tbody');
+        if (!tbody) return;
+        if (_historialFiltered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="cot-hist-empty">Sin cotizaciones que coincidan con los filtros.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = _historialFiltered.map(row => {
+            const snap = parseSnapshot(row);
+            const m = snap.metadata;
+            const e1 = snap.escenarios?.escenario_1;
+            const e2 = snap.escenarios?.escenario_2;
+            const fecha = (row.fecha_proyeccion || row.created_at || '').substring(0, 10);
+            const selected = row.id === _historialSelectedId ? 'selected' : '';
+            return `
+                <tr data-cot-id="${row.id}" class="cot-hist-row ${selected}">
+                    <td>${escapeHtml(fecha)}</td>
+                    <td>${escapeHtml(row.user_full_name || row.user_username || '—')}</td>
+                    <td><strong>${escapeHtml(m.origen?.iata || '?')} → ${escapeHtml(m.destino?.iata || '?')}</strong></td>
+                    <td>${escapeHtml(m.carguera_nombre || '—')}</td>
+                    <td>${(m.cantidad_tallos || 0).toLocaleString()}</td>
+                    <td>${e1 ? fmtMoney(e1.desglose_totales?.gran_total) : '—'}</td>
+                    <td>${e2 ? fmtMoney(e2.desglose_totales?.gran_total) : '—'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // Click en una fila abre el aside con el detalle
+    document.addEventListener('click', (e) => {
+        const tr = e.target.closest('.cot-hist-row');
+        if (!tr) return;
+        const id = parseInt(tr.dataset.cotId, 10);
+        cotHistOpenDetail(id);
+    });
+
+    function cotHistOpenDetail(id) {
+        _historialSelectedId = id;
+        const row = _historialAll.find(r => r.id === id);
+        if (!row) return;
+        const snap = parseSnapshot(row);
+        const aside = document.getElementById('cot-historial-aside');
+        if (!aside || !snap) return;
+        const m = snap.metadata;
+        const e1 = snap.escenarios?.escenario_1;
+        const e2 = snap.escenarios?.escenario_2;
+        const detailRow = (lbl, val) => `<div class="cot-aside-row"><span>${lbl}</span><strong>${val}</strong></div>`;
+        const scenarioBlock = (e, label, klass) => e ? `
+            <div class="cot-aside-scenario ${klass}">
+                <div class="cot-aside-scenario-head">${label} · ${fmtMoney(e.precio_fob_tallo)}/tallo</div>
+                ${detailRow('FOB total', fmtMoney(e.desglose_totales?.fob_total))}
+                ${detailRow('Flete', fmtMoney(e.desglose_totales?.costo_flete))}
+                ${detailRow('Costos fijos', fmtMoney(e.desglose_totales?.costos_fijos))}
+                ${detailRow('Transporte', fmtMoney(e.desglose_totales?.transporte_interno))}
+                ${e.desglose_totales?.cuarto_frio ? detailRow('Cuarto frío', fmtMoney(e.desglose_totales.cuarto_frio)) : ''}
+                ${e.desglose_totales?.impuestos > 0 ? detailRow('Impuestos', fmtMoney(e.desglose_totales.impuestos)) : ''}
+                <div class="cot-aside-total">
+                    <span>Landed Cost Total</span>
+                    <strong>${fmtMoney(e.desglose_totales?.gran_total)}</strong>
+                </div>
+                <div class="cot-aside-per">Por tallo: <strong>${fmtMoney(e.landed_cost_por_tallo)}</strong></div>
+            </div>
+        ` : '';
+        aside.innerHTML = `
+            <div class="cot-aside-head">
+                <div>
+                    <h4>${escapeHtml(m.origen?.iata)} → ${escapeHtml(m.destino?.iata)}</h4>
+                    <p>${escapeHtml(m.destino?.ciudad || '')}, ${escapeHtml(m.destino?.pais || '')}</p>
+                </div>
+                <button class="btn-close" onclick="cotHistCloseDetail()" title="Cerrar">&times;</button>
+            </div>
+            <div class="cot-aside-meta">
+                ${detailRow('Fecha', escapeHtml((row.fecha_proyeccion || row.created_at || '').substring(0, 10)))}
+                ${detailRow('Usuario', escapeHtml(row.user_full_name || row.user_username || '—'))}
+                ${detailRow('Carguera', escapeHtml(m.carguera_nombre || '—'))}
+                ${detailRow('Aerolínea', escapeHtml(m.aerolinea_nombre || '—'))}
+                ${detailRow('Tarifa flete', `${fmtMoney(m.tarifa_flete_aplicada)}/kg (${escapeHtml(m.tariff_type || 'contract')})`)}
+                ${detailRow('Cantidad', `${(m.cantidad_tallos || 0).toLocaleString()} tallos · ${m.numero_cajas || 0} cajas`)}
+                ${detailRow('Peso', `${fmtNum(m.kilos_calculados, 2)} kg`)}
+            </div>
+            <div class="cot-aside-scenarios">
+                ${scenarioBlock(e1, 'Escenario bajo', 'low')}
+                ${scenarioBlock(e2, 'Escenario alto', 'high')}
+            </div>
+            <div class="cot-aside-footer">
+                <p class="cot-aside-note">Snapshot inmutable · No editable</p>
+            </div>
+        `;
+        cotHistRenderTable();
+    }
+
+    function cotHistCloseDetail() {
+        _historialSelectedId = null;
+        const aside = document.getElementById('cot-historial-aside');
+        if (aside) aside.innerHTML = `
+            <div class="cot-hist-aside-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                <p>Click en una cotización para ver el detalle completo.</p>
+                <p class="cot-hist-aside-sub">Los snapshots son inmutables — son el registro histórico de cada decisión comercial.</p>
+            </div>
+        `;
+        cotHistRenderTable();
+    }
+
+    function cotHistFilter() {
+        // Reset all filters
+        ['cot-hist-filter-search','cot-hist-filter-carguera','cot-hist-filter-from','cot-hist-filter-to']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        cotHistApplyFilters();
     }
 
     // Llamar setupModeToggle dentro del init original
@@ -679,4 +880,8 @@
     };
     window.loadCotizacionesHistorico = loadCotizacionesHistorico;
     window.cotizadorSwitchMode = switchMode;
+    // PR-5d: historial dedicado
+    window.cotHistReload = cotHistReload;
+    window.cotHistFilter = cotHistFilter;
+    window.cotHistCloseDetail = cotHistCloseDetail;
 })();
