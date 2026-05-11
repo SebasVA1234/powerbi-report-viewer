@@ -510,12 +510,14 @@ async function seedSamplePermission() {
 // tarifas_carguera (con aerolinea, origen, destino, tariff_type, currency,
 // validity, surcharges) / tarifas_pais (por country_code) / tariff_changes_log.
 //
-// La migración detecta el schema viejo (existe tabla 'destinos' o columna
-// 'id_destino' en tarifas_carguera) y hace DROP TABLE de las viejas. Las
-// nuevas las crea loadSchema(). El seed siguiente (seedCatalogos) las
-// puebla. Como el seed viejo era solo Copa+MIA (datos de demo), no hay
-// pérdida real de datos productivos.
-async function migrateCotizadorV2() {
+// IMPORTANTE: corre ANTES de loadSchema(). Si quedan tablas viejas, el
+// loadSchema fallaría al crear índices que referencian columnas inexistentes
+// (ej. CREATE INDEX ... ON tarifas_carguera(carguera_id) sobre la tabla
+// vieja con id_carguera). Después loadSchema crea las tablas nuevas limpias.
+//
+// El seed viejo era solo Copa+MIA (datos de demo) → no hay pérdida real de
+// datos productivos.
+async function migrateCotizadorV2_PreSchema() {
     const isPg = db.driver === 'postgres';
 
     async function tableExists(name) {
@@ -546,25 +548,25 @@ async function migrateCotizadorV2() {
         return cols.some(c => c.name === column);
     }
 
-    // Schema viejo: tarifas_carguera tiene id_destino (no destino_airport_id).
-    const hasOldTarifa = await columnExists('tarifas_carguera', 'id_destino');
+    // Detección: si tarifas_carguera no tiene la columna nueva 'carguera_id'
+    // pero sí la vieja 'id_carguera', es schema v1 — hay que dropear.
+    // También dropeamos si existe 'destinos' o 'tarifas_destino' (viejas).
+    const tarifaTableExists = await tableExists('tarifas_carguera');
+    const tarifaIsOld = tarifaTableExists && !(await columnExists('tarifas_carguera', 'carguera_id'));
     const hasOldDestinos = await tableExists('destinos');
     const hasOldTarifaDestino = await tableExists('tarifas_destino');
+    // cargueras vieja tiene SOLO 'nombre'; la nueva tiene 'pais' también.
+    const cargTableExists = await tableExists('cargueras');
+    const cargIsOld = cargTableExists && !(await columnExists('cargueras', 'pais'));
 
-    if (hasOldTarifa || hasOldDestinos || hasOldTarifaDestino) {
-        console.log('🔄 Migración cotizador v1 → v2: dropeando tablas viejas');
-        // Drop in reverse dependency order.
-        try { await db.exec('DROP TABLE IF EXISTS tarifas_destino'); } catch {}
-        try { await db.exec('DROP TABLE IF EXISTS tarifas_carguera'); } catch {}
-        try { await db.exec('DROP TABLE IF EXISTS destinos'); } catch {}
-        // 'cargueras' viejas (solo nombre) también se dropean — el schema
-        // nuevo las recrea con columnas adicionales (pais, email, contacto).
-        try { await db.exec('DROP TABLE IF EXISTS cargueras'); } catch {}
-        // Re-aplicar el schema completo para que cree las nuevas tablas.
-        const file = isPg ? 'postgres.sql' : 'sqlite.sql';
-        const sql = fs.readFileSync(path.join(SCHEMA_DIR, file), 'utf8');
-        await db.exec(sql);
-        console.log('🔄 Cotizador v2: tablas nuevas creadas (airports, aerolineas, cargueras, tarifas_carguera, tarifas_pais, tariff_changes_log)');
+    if (tarifaIsOld || hasOldDestinos || hasOldTarifaDestino || cargIsOld) {
+        console.log('🔄 Migración cotizador v1 → v2: dropeando tablas viejas (pre-schema)');
+        // Drop en orden inverso de dependencias FK.
+        try { await db.exec('DROP TABLE IF EXISTS tarifas_destino CASCADE'); } catch {}
+        try { await db.exec('DROP TABLE IF EXISTS tarifas_carguera CASCADE'); } catch {}
+        try { await db.exec('DROP TABLE IF EXISTS destinos CASCADE'); } catch {}
+        try { await db.exec('DROP TABLE IF EXISTS cargueras CASCADE'); } catch {}
+        console.log('🔄 Cotizador v2: tablas viejas dropeadas; loadSchema creará las nuevas');
     }
 }
 
@@ -765,12 +767,17 @@ async function seedHrPositions() {
 
 async function init() {
     console.log('🔧 Inicializando base de datos...');
+    // CRÍTICO: la migración del cotizador v2 va ANTES de loadSchema porque
+    // los nuevos índices del schema (idx_tarifa_carg_lookup) referencian
+    // columnas (carguera_id, aerolinea_id, etc.) que en el schema viejo
+    // no existían — y CREATE INDEX IF NOT EXISTS no es robusto a columnas
+    // faltantes.
+    await migrateCotizadorV2_PreSchema();
     await loadSchema();
     await migrateAccessLogsDocCol();
     await migrateUsersAuthFields();
     await migrateUsersTotpFields();
     await migrateDocumentsStorageKey();
-    await migrateCotizadorV2();
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();
