@@ -1607,6 +1607,344 @@ input[type="file"]::file-selector-button:hover {
 }
 
 /* ============================================================
+   PR-2d · MÓDULO ADMINISTRACIÓN DE USUARIOS
+   ============================================================
+   Componentes para la nueva UI del panel de permisos por usuario:
+   - role-pill: chip coloreado por rol RBAC (9 variantes)
+   - dept-pill: chip neutro para departamento
+   - perm-row + perm-chip: filas de permisos con switch + estado
+   - perm-effective: grid read-only de permisos efectivos
+   - locked-action: botón bloqueado (target admin)
+   - user-perm-modal: ajustes del modal grande
+   ============================================================ */
+
+/* --- Pills coloreadas por rol RBAC --- */
+.role-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-pill);
+    border: 1px solid;
+    line-height: 1.4;
+}
+.role-pill .role-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.role-pill.role-admin_sistema {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+.role-pill.role-gerencia,
+.role-pill.role-jefe_innovacion {
+    background: rgba(168, 85, 247, 0.18);
+    color: #d8b4fe;
+    border-color: rgba(168, 85, 247, 0.35);
+}
+.role-pill.role-jefe_compras,
+.role-pill.role-jefe_ventas,
+.role-pill.role-jefe_contabilidad,
+.role-pill.role-jefe_marketing {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+    border-color: rgba(59, 130, 246, 0.35);
+}
+.role-pill.role-rrhh {
+    background: rgba(236, 72, 153, 0.18);
+    color: #f9a8d4;
+    border-color: rgba(236, 72, 153, 0.35);
+}
+.role-pill.role-empleado {
+    background: rgba(148, 163, 184, 0.18);
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.30);
+}
+.role-pill.role-none {
+    background: rgba(148, 163, 184, 0.10);
+    color: var(--text-3);
+    border-color: var(--border);
+    font-style: italic;
+}
+
+.dept-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.22rem 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--accent-light);
+    border: 1px solid rgba(16, 185, 129, 0.28);
+    border-radius: var(--radius-pill);
+    line-height: 1.4;
+}
+
+/* --- Botón de permisos (engranaje verde) --- */
+.btn-permissions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.30);
+    color: var(--accent-light);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.btn-permissions:hover {
+    background: rgba(16, 185, 129, 0.22);
+    transform: translateY(-1px);
+}
+.btn-permissions svg { width: 16px; height: 16px; }
+
+/* --- Acción bloqueada (target admin) --- */
+.btn-locked {
+    opacity: 0.35;
+    cursor: not-allowed !important;
+    pointer-events: none;
+    position: relative;
+}
+.btn-locked::after {
+    content: "🔒";
+    position: absolute;
+    top: -4px; right: -4px;
+    font-size: 0.7rem;
+    background: var(--bg-elevated);
+    border-radius: 50%;
+    padding: 1px 2px;
+    line-height: 1;
+}
+
+/* --- Modal de permisos: ancho amplio --- */
+.user-perm-modal .modal-content {
+    max-width: 720px;
+    width: 95%;
+}
+.user-perm-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+.user-perm-header .perm-avatar {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: var(--gradient-brand);
+    display: flex; align-items: center; justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+.user-perm-header .perm-identity {
+    flex: 1;
+    min-width: 0;
+}
+.user-perm-header .perm-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-1);
+    margin: 0 0 0.15rem 0;
+}
+.user-perm-header .perm-email {
+    font-size: 0.82rem;
+    color: var(--text-3);
+    margin: 0 0 0.5rem 0;
+}
+.user-perm-header .perm-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+/* --- Tabs internos del modal --- */
+.user-perm-tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0 1.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-app);
+}
+.user-perm-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-3);
+    padding: 0.8rem 1.1rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.user-perm-tab:hover { color: var(--text-1); }
+.user-perm-tab.active {
+    color: var(--primary-light);
+    border-bottom-color: var(--primary);
+}
+.user-perm-pane {
+    display: none;
+    padding: 1.25rem 1.5rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.user-perm-pane.active { display: block; }
+
+/* --- Secciones dentro del pane --- */
+.perm-section {
+    margin-bottom: 1.5rem;
+}
+.perm-section:last-child { margin-bottom: 0; }
+.perm-section-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+    margin: 0 0 0.65rem 0;
+}
+.perm-section-help {
+    font-size: 0.78rem;
+    color: var(--text-3);
+    margin: 0.35rem 0 0 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+}
+.perm-section-help::before {
+    content: "ℹ";
+    color: var(--primary-light);
+    font-weight: 700;
+}
+
+/* --- Grid de departamentos (checkboxes) --- */
+.dept-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.85rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+.dept-check {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    font-size: 0.88rem;
+    color: var(--text-1);
+}
+.dept-check:hover {
+    background: rgba(99, 102, 241, 0.08);
+}
+.dept-check input[type="checkbox"] {
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+/* --- Lista de permisos efectivos (read-only display) --- */
+.perm-effective-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 1rem;
+    padding: 0.85rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+.perm-effective-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    font-size: 0.84rem;
+    color: var(--text-2);
+}
+.perm-effective-item .perm-icon {
+    flex-shrink: 0;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.perm-effective-item.granted .perm-icon {
+    background: rgba(16, 185, 129, 0.20);
+    color: var(--accent-light);
+}
+.perm-effective-item.denied .perm-icon {
+    background: rgba(148, 163, 184, 0.15);
+    color: var(--text-3);
+}
+.perm-effective-item.granted { color: var(--text-1); }
+.perm-effective-item.denied {
+    color: var(--text-3);
+    text-decoration: line-through;
+    text-decoration-color: rgba(148, 163, 184, 0.3);
+}
+
+/* --- Tab "Cuenta" — zona de acciones administrativas --- */
+.account-action {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.85rem 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.65rem;
+}
+.account-action .aa-info { flex: 1; min-width: 0; }
+.account-action .aa-label {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-1);
+    margin: 0 0 0.15rem 0;
+}
+.account-action .aa-desc {
+    font-size: 0.78rem;
+    color: var(--text-3);
+    margin: 0;
+}
+.account-action.danger-zone {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.25);
+}
+.account-action.danger-zone .aa-label { color: #fca5a5; }
+
+/* --- Aviso de admin bloqueado --- */
+.admin-target-notice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background: rgba(239, 68, 68, 0.10);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: var(--radius-md);
+    color: #fca5a5;
+    font-size: 0.85rem;
+}
+.admin-target-notice::before {
+    content: "🛡️";
+    font-size: 1.1rem;
+}
+
+/* ============================================================
    LIGHT MODE — bloque maestro al final del archivo
    ============================================================
    Sigue prefers-color-scheme del SO. Ubicado al final para que sus
@@ -1787,5 +2125,72 @@ input[type="file"]::file-selector-button:hover {
     }
     .tour-spotlight {
         box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.45) !important;
+    }
+
+    /* PR-2d · Light overrides para módulo admin usuarios */
+    .role-pill.role-admin_sistema {
+        background: rgba(239, 68, 68, 0.10) !important;
+        color: #b91c1c !important;
+        border-color: rgba(239, 68, 68, 0.30) !important;
+    }
+    .role-pill.role-gerencia,
+    .role-pill.role-jefe_innovacion {
+        background: rgba(168, 85, 247, 0.10) !important;
+        color: #7e22ce !important;
+        border-color: rgba(168, 85, 247, 0.30) !important;
+    }
+    .role-pill.role-jefe_compras,
+    .role-pill.role-jefe_ventas,
+    .role-pill.role-jefe_contabilidad,
+    .role-pill.role-jefe_marketing {
+        background: rgba(59, 130, 246, 0.10) !important;
+        color: #1d4ed8 !important;
+        border-color: rgba(59, 130, 246, 0.30) !important;
+    }
+    .role-pill.role-rrhh {
+        background: rgba(236, 72, 153, 0.10) !important;
+        color: #be185d !important;
+        border-color: rgba(236, 72, 153, 0.30) !important;
+    }
+    .role-pill.role-empleado {
+        background: rgba(148, 163, 184, 0.12) !important;
+        color: #475569 !important;
+        border-color: rgba(148, 163, 184, 0.30) !important;
+    }
+    .dept-pill {
+        background: rgba(16, 185, 129, 0.10) !important;
+        color: #047857 !important;
+        border-color: rgba(16, 185, 129, 0.30) !important;
+    }
+    .btn-permissions {
+        background: rgba(16, 185, 129, 0.10) !important;
+        color: #047857 !important;
+        border-color: rgba(16, 185, 129, 0.30) !important;
+    }
+    .btn-permissions:hover {
+        background: rgba(16, 185, 129, 0.18) !important;
+    }
+    .perm-effective-item.granted .perm-icon {
+        background: rgba(16, 185, 129, 0.15) !important;
+        color: #047857 !important;
+    }
+    .perm-effective-item.denied .perm-icon {
+        background: rgba(148, 163, 184, 0.12) !important;
+        color: #64748b !important;
+    }
+    .admin-target-notice {
+        background: rgba(239, 68, 68, 0.06) !important;
+        color: #b91c1c !important;
+        border-color: rgba(239, 68, 68, 0.25) !important;
+    }
+    .account-action.danger-zone {
+        background: rgba(239, 68, 68, 0.06) !important;
+        border-color: rgba(239, 68, 68, 0.22) !important;
+    }
+    .account-action.danger-zone .aa-label {
+        color: #b91c1c !important;
+    }
+    .user-perm-tab.active {
+        color: var(--primary-dark) !important;
     }
 }

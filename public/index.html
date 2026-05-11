@@ -1095,6 +1095,123 @@
             </div>
         </div>
 
+        <!-- PR-2d: Modal Permisos por Usuario (botón engranaje verde de la tabla) -->
+        <div id="user-permissions-modal" class="modal user-perm-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Permisos del usuario</h3>
+                    <button class="btn-close" onclick="closeModal('user-permissions-modal')">&times;</button>
+                </div>
+
+                <!-- Header con identidad + pills (poblado por JS) -->
+                <div class="user-perm-header" id="user-perm-header">
+                    <div class="perm-avatar" id="user-perm-avatar">?</div>
+                    <div class="perm-identity">
+                        <p class="perm-name" id="user-perm-name">—</p>
+                        <p class="perm-email" id="user-perm-email">—</p>
+                        <div class="perm-pills" id="user-perm-pills"></div>
+                    </div>
+                </div>
+
+                <!-- Aviso si target es admin (oculto por default) -->
+                <div id="user-perm-admin-notice" style="display:none; margin: 0.75rem 1.5rem 0;">
+                    <div class="admin-target-notice">
+                        Este usuario es Administrador. Por seguridad, no podés modificar sus permisos, contraseña ni eliminarlo.
+                    </div>
+                </div>
+
+                <!-- Tabs internas -->
+                <div class="user-perm-tabs">
+                    <button class="user-perm-tab active" data-perm-tab="summary">Resumen</button>
+                    <button class="user-perm-tab" data-perm-tab="effective">Permisos efectivos</button>
+                    <button class="user-perm-tab" data-perm-tab="account">Cuenta</button>
+                </div>
+
+                <form id="user-perm-form">
+                    <input type="hidden" id="user-perm-userid">
+                    <input type="hidden" id="user-perm-is-admin" value="0">
+
+                    <!-- Pane: Resumen (rol + departamentos) -->
+                    <div class="user-perm-pane active" data-perm-pane="summary">
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Rol jerárquico</h4>
+                            <select id="user-perm-role" style="width:100%; padding:0.65rem; border-radius:var(--radius-md); background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-1); font-size:0.9rem;">
+                                <option value="">— Cargando roles —</option>
+                            </select>
+                            <p class="perm-section-help">Define qué módulos puede usar (Empleado, Jefe, Gerencia, RRHH, Admin).</p>
+                        </div>
+
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Departamentos</h4>
+                            <div class="dept-grid" id="user-perm-depts">
+                                <em style="color:var(--text-3); font-size:0.85rem; grid-column:1/-1;">Cargando departamentos…</em>
+                            </div>
+                            <p class="perm-section-help">Define qué documentos puede ver (filtra por departamento del documento).</p>
+                        </div>
+                    </div>
+
+                    <!-- Pane: Permisos efectivos (read-only display) -->
+                    <div class="user-perm-pane" data-perm-pane="effective">
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Lo que este usuario puede hacer ahora</h4>
+                            <div class="perm-effective-grid" id="user-perm-effective">
+                                <em style="color:var(--text-3); font-size:0.85rem; grid-column:1/-1;">Cargando permisos…</em>
+                            </div>
+                            <p class="perm-section-help">Derivados del rol y departamento. Para excepciones individuales (forzar Sí/No para un permiso puntual), próximamente.</p>
+                        </div>
+                    </div>
+
+                    <!-- Pane: Cuenta (suspender / reset password / eliminar) -->
+                    <div class="user-perm-pane" data-perm-pane="account">
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Estado de la cuenta</h4>
+                            <div class="account-action">
+                                <div class="aa-info">
+                                    <p class="aa-label" id="user-perm-status-label">Activo</p>
+                                    <p class="aa-desc">Si se suspende, el usuario no podrá iniciar sesión hasta reactivar.</p>
+                                </div>
+                                <button type="button" class="btn btn-outline" id="user-perm-toggle-status" onclick="userPerm.toggleStatus()">Suspender</button>
+                            </div>
+                        </div>
+
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Contraseña</h4>
+                            <div class="account-action">
+                                <div class="aa-info">
+                                    <p class="aa-label">Forzar cambio en próximo login</p>
+                                    <p class="aa-desc">El usuario deberá elegir nueva contraseña al iniciar sesión.</p>
+                                </div>
+                                <button type="button" class="btn btn-outline" onclick="userPerm.forceChangePassword()">Forzar</button>
+                            </div>
+                            <div class="account-action">
+                                <div class="aa-info">
+                                    <p class="aa-label">Generar contraseña temporal</p>
+                                    <p class="aa-desc">Se mostrará una vez para que la copies y se la pases al usuario.</p>
+                                </div>
+                                <button type="button" class="btn btn-outline" onclick="userPerm.resetPassword()">Generar</button>
+                            </div>
+                        </div>
+
+                        <div class="perm-section">
+                            <h4 class="perm-section-title" style="color: rgba(239, 68, 68, 0.85);">Zona peligrosa</h4>
+                            <div class="account-action danger-zone">
+                                <div class="aa-info">
+                                    <p class="aa-label">Eliminar cuenta</p>
+                                    <p class="aa-desc">Acción irreversible. Se conserva el historial de auditoría.</p>
+                                </div>
+                                <button type="button" class="btn btn-outline" style="border-color: rgba(239,68,68,0.4); color:#fca5a5;" onclick="userPerm.deleteUser()">Eliminar</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('user-permissions-modal')">Cerrar</button>
+                        <button type="submit" class="btn btn-primary" id="user-perm-save-btn">Guardar cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Modal: Crear Reporte -->
         <div id="create-report-modal" class="modal">
             <div class="modal-content">
@@ -1432,6 +1549,7 @@
     <script src="js/tour.js"></script>
     <script src="js/admin.js"></script>
     <script src="js/rbac-admin.js"></script>
+    <script src="js/user-permissions.js"></script>
     <script src="js/hr-admin.js"></script>
     <script src="js/app.js"></script>
 </body>

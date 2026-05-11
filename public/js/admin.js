@@ -82,14 +82,31 @@ async function loadUsers() {
     }
 }
 
-// Display Users - Con botón de editar
+// Display Users - PR-2d: pill coloreada por rol legacy + botón Permisos
+// que abre el modal RBAC completo. La col "Rol" sigue mostrando el rol legacy
+// (admin/user) porque el endpoint GET /api/users no expande roles RBAC; el
+// rol jerárquico real se ve dentro del modal de permisos.
 function displayUsers(users) {
     const tbody = document.getElementById('users-table-body');
     if (users.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6">No hay usuarios</td></tr>';
         return;
     }
-    tbody.innerHTML = users.map(user => `
+    tbody.innerHTML = users.map(user => {
+        const isAdmin = user.role === 'admin';
+        // Pill de rol legacy con tooltip que invita a abrir Permisos para ver el rol RBAC real
+        const rolePillClass = isAdmin ? 'role-admin_sistema' : 'role-empleado';
+        const roleLabel = isAdmin ? 'Administrador' : 'Usuario';
+        // Bloqueo visual de delete si target es admin (defensa horizontal espejo del backend)
+        const deleteBtn = isAdmin
+            ? `<button class="btn-delete btn-locked" title="No podés eliminar a otro Administrador" disabled>
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+               </button>`
+            : `<button class="btn-delete" onclick="deleteUser(${user.id})" title="Eliminar usuario">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+               </button>`;
+
+        return `
         <tr>
             <td>
                 <div class="user-row">
@@ -102,20 +119,22 @@ function displayUsers(users) {
             </td>
             <td>${user.full_name}</td>
             <td>${user.email}</td>
-            <td><span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-user'}">${user.role === 'admin' ? 'Administrador' : 'Usuario'}</span></td>
+            <td><span class="role-pill ${rolePillClass}"><span class="role-dot"></span>${roleLabel}</span></td>
             <td><span class="badge ${user.is_active ? 'badge-success' : 'badge-danger'}">${user.is_active ? 'Activo' : 'Inactivo'}</span></td>
             <td>
                 <div class="table-actions">
-                    <button class="btn-edit" onclick="editUser(${user.id})" title="Editar Usuario">
+                    <button class="btn-permissions" onclick="openUserPermissions(${user.id})" title="Permisos · rol · departamento · cuenta">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </button>
+                    <button class="btn-edit" onclick="editUser(${user.id})" title="Editar perfil básico">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     </button>
-                    <button class="btn-delete" onclick="deleteUser(${user.id})" title="Eliminar">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
+                    ${deleteBtn}
                 </div>
             </td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 }
 
 // Load All Reports
