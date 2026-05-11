@@ -6,6 +6,16 @@
 (function () {
     let lastResult = null;          // Resultado del último cálculo (para "Guardar")
     let cataloguesLoaded = false;   // Para no re-pedir destinos/cargueras
+    // PR-5a: cache local de catálogos y tarifas para la cascada de filtros
+    // (origen → destino → carguera → aerolínea → tarifa vigente).
+    let _airports = [];
+    let _cargueras = [];
+    let _aerolineas = [];
+    let _tarifas = [];
+    // Estado de la cotización en curso (ids seleccionados)
+    let _state = { origen: null, destino: null, carguera: null, aerolinea: null };
+    // Factor de conversión por defecto: 0.056 kg/tallo (mismo que el backend)
+    const FACTOR_KG_TALLO = 0.056;
 
     function fmtMoney(n) {
         if (n === null || n === undefined || !Number.isFinite(+n)) return '-';
@@ -26,12 +36,18 @@
             await loadCatalogues();
             cataloguesLoaded = true;
         }
-        // Fecha por defecto: hoy
+        // Fecha por defecto: hoy (input hidden)
         const fechaInput = document.getElementById('cot-fecha');
         if (fechaInput && !fechaInput.value) {
             fechaInput.value = new Date().toISOString().split('T')[0];
         }
-        // Conectar el form (una sola vez)
+        // PR-5a: setup de los 2 autocompletes de aeropuertos. Si origen no está
+        // seteado, pre-llena con UIO (Quito) que es el 95% de los envíos.
+        setupAirportAutocomplete('origen');
+        setupAirportAutocomplete('destino');
+        preselectAirportByIata('origen', 'UIO');
+
+        // Conectar form + listeners de cascada
         const form = document.getElementById('cotizador-form');
         if (form && !form._wired) {
             form.addEventListener('submit', onCalcular);
@@ -42,56 +58,306 @@
             btnGuardar.addEventListener('click', onGuardar);
             btnGuardar._wired = true;
         }
-        // Mostrar mensaje vacío inicial
+        // Cambios en carguera/aerolínea actualizan el state y la tarjeta de tarifa
+        const selCarg = document.getElementById('cot-carguera');
+        const selAero = document.getElementById('cot-aerolinea');
+        if (selCarg && !selCarg._wired) {
+            selCarg.addEventListener('change', () => {
+                _state.carguera = parseInt(selCarg.value, 10) || null;
+                refreshAerolineas();   // filtrar aerolíneas válidas para esta carguera+ruta
+                refreshTarifaCard();
+            });
+            selCarg._wired = true;
+        }
+        if (selAero && !selAero._wired) {
+            selAero.addEventListener('change', () => {
+                _state.aerolinea = parseInt(selAero.value, 10) || null;
+                refreshTarifaCard();
+            });
+            selAero._wired = true;
+        }
+
+        // Cascada inicial cuando ya hay origen pre-seleccionado
+        refreshCargueras();
+        refreshTarifaCard();
+
         renderEmpty();
-        // Cargar histórico
         loadCotizacionesHistorico();
     }
 
     async function loadCatalogues() {
         try {
-            const [airR, aerR, cargR] = await Promise.all([
+            const [airR, aerR, cargR, tarR] = await Promise.all([
                 API.cotizadorListAirports(),
                 API.cotizadorListAerolineas(),
-                API.cotizadorListCargueras()
+                API.cotizadorListCargueras(),
+                API.cotizadorListTarifas ? API.cotizadorListTarifas() : fetch('/api/cotizador/tarifas', {
+                    headers: { Authorization: 'Bearer ' + Utils.getToken() }
+                }).then(r => r.json())
             ]);
-            const airports = airR.data || [];
-            const aerolineas = aerR.data || [];
-            const cargueras = cargR.data || [];
-
-            // Origen y destino tienen TODOS los aeropuertos. Ordenamos
-            // los selects para poner los más usados arriba: UIO siempre
-            // primero como origen (Ecualand exporta principalmente desde
-            // Quito); MIA primero como destino (mercado #1 para flores EC).
-            const airportOpt = a => `<option value="${a.id}">${escapeHtml(a.iata_code)} — ${escapeHtml(a.city)} (${escapeHtml(a.country)})</option>`;
-            const PRIORIDAD_ORIGEN = ['UIO', 'GYE'];          // Ecuador primero
-            const PRIORIDAD_DESTINO = ['MIA', 'AMS', 'JFK'];  // top mercados flores
-            const ordenarPor = (lista) => (a, b) => {
-                const ia = lista.indexOf(a.iata_code);
-                const ib = lista.indexOf(b.iata_code);
-                const va = ia === -1 ? 1000 + (a.city || '').charCodeAt(0) : ia;
-                const vb = ib === -1 ? 1000 + (b.city || '').charCodeAt(0) : ib;
-                return va - vb || (a.city || '').localeCompare(b.city || '');
-            };
-            const orig = document.getElementById('cot-origen');
-            const dest = document.getElementById('cot-destino');
-            orig.innerHTML = [...airports].sort(ordenarPor(PRIORIDAD_ORIGEN)).map(airportOpt).join('');
-            dest.innerHTML = [...airports].sort(ordenarPor(PRIORIDAD_DESTINO)).map(airportOpt).join('');
-
-            const selCarg = document.getElementById('cot-carguera');
-            selCarg.innerHTML = cargueras.map(c =>
-                `<option value="${c.id}">${escapeHtml(c.nombre)}${c.pais ? ' (' + escapeHtml(c.pais) + ')' : ''}</option>`
-            ).join('');
-
-            const selAero = document.getElementById('cot-aerolinea');
-            selAero.innerHTML = aerolineas.map(a =>
-                `<option value="${a.id}">${escapeHtml(a.nombre)}${a.codigo_iata ? ' (' + escapeHtml(a.codigo_iata) + ')' : ''}</option>`
-            ).join('');
+            _airports = airR.data || [];
+            _aerolineas = aerR.data || [];
+            _cargueras = cargR.data || [];
+            _tarifas = (tarR && tarR.data) || [];
         } catch (err) {
             console.error('Error cargando catálogos:', err);
             Notification.error('No se pudieron cargar los catálogos del cotizador');
         }
     }
+
+    // --------------------------------------------------------------------
+    // PR-5a: Autocomplete de aeropuertos. Filtra _airports por texto en
+    // ciudad, nombre o IATA. Cada resultado muestra: nombre + ciudad/país
+    // + pill IATA a la derecha (igual al mockup).
+    // --------------------------------------------------------------------
+    function setupAirportAutocomplete(role) {
+        const field = document.querySelector(`.cot-airport-field[data-airport-role="${role}"]`);
+        if (!field || field._wired) return;
+        const input  = field.querySelector('[data-airport-input]');
+        const search = field.querySelector('.cot-airport-search');
+        const list   = field.querySelector('.cot-airport-results');
+        const hidden = document.getElementById(`cot-${role}-id`);
+
+        function renderList(query) {
+            const q = (query || '').toLowerCase().trim();
+            const matches = _airports.filter(a => {
+                if (!q) return true;
+                return (a.iata_code || '').toLowerCase().includes(q)
+                    || (a.city || '').toLowerCase().includes(q)
+                    || (a.name || '').toLowerCase().includes(q)
+                    || (a.country || '').toLowerCase().includes(q);
+            }).slice(0, 50);
+            if (matches.length === 0) {
+                list.innerHTML = '<div class="cot-airport-no-results">Sin resultados</div>';
+                return;
+            }
+            list.innerHTML = matches.map(a => `
+                <div class="cot-airport-result" data-airport-id="${a.id}">
+                    <div class="cot-airport-result-main">
+                        <div class="cot-airport-result-name">${escapeHtml(a.name || a.city || 'Aeropuerto')}</div>
+                        <div class="cot-airport-result-location">${escapeHtml(a.city || '')}${a.country ? ', ' + escapeHtml(a.country) : ''}</div>
+                    </div>
+                    <span class="cot-airport-result-iata">${escapeHtml(a.iata_code)}</span>
+                </div>
+            `).join('');
+        }
+
+        function selectAirport(airport) {
+            hidden.value = airport.id;
+            const text = `${airport.city || airport.name} — ${airport.iata_code}${airport.country ? ' — ' + airport.country : ''}`;
+            const sel = input.querySelector('.cot-airport-text');
+            sel.textContent = text;
+            sel.classList.remove('placeholder');
+            field.classList.remove('open');
+            _state[role] = airport.id;
+            refreshCargueras();
+            refreshTarifaCard();
+            updateWeightEstimate();
+            updateCalcButtonState();
+        }
+
+        input.addEventListener('click', () => {
+            field.classList.toggle('open');
+            if (field.classList.contains('open')) {
+                renderList(search.value);
+                setTimeout(() => search.focus(), 50);
+            }
+        });
+        search.addEventListener('input', () => renderList(search.value));
+        list.addEventListener('click', (e) => {
+            const row = e.target.closest('.cot-airport-result');
+            if (!row) return;
+            const id = parseInt(row.dataset.airportId, 10);
+            const airport = _airports.find(a => a.id === id);
+            if (airport) selectAirport(airport);
+        });
+        // Click fuera cierra el dropdown
+        document.addEventListener('click', (e) => {
+            if (!field.contains(e.target)) field.classList.remove('open');
+        });
+        field._wired = true;
+    }
+
+    function preselectAirportByIata(role, iata) {
+        const a = _airports.find(x => x.iata_code === iata);
+        if (!a) return;
+        const field = document.querySelector(`.cot-airport-field[data-airport-role="${role}"]`);
+        if (!field) return;
+        document.getElementById(`cot-${role}-id`).value = a.id;
+        const sel = field.querySelector('.cot-airport-text');
+        sel.textContent = `${a.city || a.name} — ${a.iata_code}${a.country ? ' — ' + a.country : ''}`;
+        sel.classList.remove('placeholder');
+        _state[role] = a.id;
+    }
+
+    // --------------------------------------------------------------------
+    // PR-5a: Cascada de filtros. La tarifa NO depende solo de la aerolínea —
+    // la misma aerolínea con dos cargueras distintas tiene tarifas distintas
+    // (la negociación es con la carguera). Por eso filtramos en orden:
+    //   origen + destino → cargueras válidas
+    //   carguera + ruta  → aerolíneas válidas
+    //   todo lo anterior → tarjeta de tarifa vigente
+    // --------------------------------------------------------------------
+    function tariffsForRoute() {
+        if (!_state.origen || !_state.destino) return [];
+        return _tarifas.filter(t =>
+            Number(t.origen_airport_id) === Number(_state.origen) &&
+            Number(t.destino_airport_id) === Number(_state.destino) &&
+            t.is_active !== 0
+        );
+    }
+
+    function refreshCargueras() {
+        const sel = document.getElementById('cot-carguera');
+        if (!sel) return;
+        const validCargIds = new Set(tariffsForRoute().map(t => Number(t.carguera_id)));
+        const visibles = _cargueras.filter(c => validCargIds.size === 0 || validCargIds.has(Number(c.id)));
+        const opts = ['<option value="">— Elegí carguera —</option>'];
+        for (const c of visibles) {
+            const selected = Number(c.id) === Number(_state.carguera) ? 'selected' : '';
+            opts.push(`<option value="${c.id}" ${selected}>${escapeHtml(c.nombre)}${c.pais ? ' (' + escapeHtml(c.pais) + ')' : ''}</option>`);
+        }
+        sel.innerHTML = opts.join('');
+        if (!visibles.find(c => Number(c.id) === Number(_state.carguera))) {
+            _state.carguera = null;
+            sel.value = '';
+        }
+        refreshAerolineas();
+    }
+
+    function refreshAerolineas() {
+        const sel = document.getElementById('cot-aerolinea');
+        if (!sel) return;
+        let validAeroIds;
+        if (_state.carguera) {
+            validAeroIds = new Set(
+                tariffsForRoute()
+                    .filter(t => Number(t.carguera_id) === Number(_state.carguera))
+                    .map(t => Number(t.aerolinea_id))
+            );
+        } else {
+            validAeroIds = new Set(tariffsForRoute().map(t => Number(t.aerolinea_id)));
+        }
+        const visibles = _aerolineas.filter(a => validAeroIds.size === 0 || validAeroIds.has(Number(a.id)));
+        const opts = ['<option value="">— Elegí aerolínea —</option>'];
+        for (const a of visibles) {
+            const selected = Number(a.id) === Number(_state.aerolinea) ? 'selected' : '';
+            opts.push(`<option value="${a.id}" ${selected}>${escapeHtml(a.nombre)}${a.codigo_iata ? ' (' + escapeHtml(a.codigo_iata) + ')' : ''}</option>`);
+        }
+        sel.innerHTML = opts.join('');
+        if (!visibles.find(a => Number(a.id) === Number(_state.aerolinea))) {
+            _state.aerolinea = null;
+            sel.value = '';
+        }
+    }
+
+    function refreshTarifaCard() {
+        const card = document.getElementById('cot-tarifa-card');
+        if (!card) return;
+        if (!_state.origen || !_state.destino) {
+            card.style.display = 'none';
+            return;
+        }
+        if (!_state.carguera) {
+            card.style.display = 'block';
+            card.className = 'cot-tarifa-card';
+            const count = tariffsForRoute().length;
+            card.innerHTML = count > 0
+                ? `<strong>${count}</strong> carguera(s) con tarifa configurada para esta ruta. Elegí una para ver el detalle.`
+                : `Sin tarifas configuradas para esta ruta. <a href="#" onclick="event.preventDefault(); switchToTariffsConfig && switchToTariffsConfig();" style="color:inherit; text-decoration:underline;">Configurar tarifas</a>.`;
+            if (count === 0) card.classList.add('warning');
+            return;
+        }
+        // Carguera elegida — buscar tarifa(s) específicas
+        const rutaCargTariffs = tariffsForRoute().filter(t => Number(t.carguera_id) === Number(_state.carguera));
+        let candidates = rutaCargTariffs;
+        if (_state.aerolinea) {
+            candidates = candidates.filter(t => Number(t.aerolinea_id) === Number(_state.aerolinea));
+        }
+        if (candidates.length === 0) {
+            card.style.display = 'block';
+            card.className = 'cot-tarifa-card warning';
+            card.innerHTML = `<strong>Sin tarifa configurada</strong> para esta combinación carguera × aerolínea × ruta. Probá otra combinación o contactá al admin.`;
+            return;
+        }
+        // Tomamos la primera vigente que cubra el peso estimado
+        const pesoEst = estimatedWeight() || 100;
+        const vigente = candidates.find(t => {
+            const min = Number(t.peso_minimo) || 0;
+            const max = Number(t.peso_maximo) || Infinity;
+            return pesoEst >= min && pesoEst <= max;
+        }) || candidates[0];
+
+        const carg = _cargueras.find(c => Number(c.id) === Number(vigente.carguera_id));
+        const aero = _aerolineas.find(a => Number(a.id) === Number(vigente.aerolinea_id));
+        const validez = vigente.validity_to ? `Válida hasta ${formatDate(vigente.validity_to)}` : 'Sin fecha de vencimiento';
+        const rango = (vigente.peso_minimo != null && vigente.peso_maximo != null)
+            ? `${vigente.peso_minimo}–${vigente.peso_maximo} kg`
+            : 'Sin rango de peso';
+
+        card.style.display = 'block';
+        card.className = 'cot-tarifa-card';
+        card.innerHTML = `
+            <div><span class="cot-tarifa-rate">${fmtMoney(vigente.tarifa_kilo)}/kg</span>para envíos ${rango}</div>
+            <div class="cot-tarifa-meta">
+                ${carg ? escapeHtml(carg.nombre) : ''}${aero ? ' vía ' + escapeHtml(aero.nombre) : ''} · ${validez}
+            </div>
+        `;
+    }
+
+    function formatDate(d) {
+        if (!d) return '';
+        try {
+            const dt = new Date(d);
+            if (isNaN(dt)) return String(d).substring(0, 10);
+            return dt.toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
+        } catch { return String(d).substring(0, 10); }
+    }
+
+    function estimatedWeight() {
+        const tallos = parseInt(document.getElementById('cot-tallos').value, 10) || 0;
+        const manualKilos = parseFloat(document.getElementById('cot-kilos').value);
+        if (!isNaN(manualKilos) && manualKilos > 0) return manualKilos;
+        return tallos * FACTOR_KG_TALLO;
+    }
+
+    function updateWeightEstimate() {
+        const span = document.getElementById('cot-weight-estimate');
+        if (!span) return;
+        const tallos = parseInt(document.getElementById('cot-tallos').value, 10) || 0;
+        if (tallos > 0) {
+            const peso = (tallos * FACTOR_KG_TALLO).toFixed(0);
+            span.textContent = `Peso estimado: ${peso} kg (${tallos.toLocaleString()} tallos × ${FACTOR_KG_TALLO} kg)`;
+        } else {
+            span.textContent = '';
+        }
+    }
+
+    function updateCalcButtonState() {
+        // Habilita el botón sólo si todos los campos requeridos están llenos
+        const btn = document.getElementById('cot-calc-btn');
+        if (!btn) return;
+        const tallos     = parseInt(document.getElementById('cot-tallos').value, 10);
+        const tallosCaja = parseInt(document.getElementById('cot-tallos-caja').value, 10);
+        const p1         = parseFloat(document.getElementById('cot-precio-1').value);
+        const p2         = parseFloat(document.getElementById('cot-precio-2').value);
+        const ok = Number.isFinite(tallos) && tallos > 0
+                && Number.isFinite(tallosCaja) && tallosCaja > 0
+                && Number.isFinite(p1) && p1 > 0
+                && Number.isFinite(p2) && p2 > 0
+                && _state.origen && _state.destino
+                && _state.carguera && _state.aerolinea;
+        btn.disabled = !ok;
+    }
+
+    // Listeners para los campos numéricos de la sección 3
+    document.addEventListener('input', (e) => {
+        if (e.target.matches('#cot-tallos, #cot-tallos-caja, #cot-precio-1, #cot-precio-2, #cot-kilos')) {
+            updateWeightEstimate();
+            updateCalcButtonState();
+            if (e.target.id === 'cot-tallos') refreshTarifaCard();
+        }
+    });
 
     function readForm() {
         return {
@@ -102,8 +368,8 @@
             kilos_totales: document.getElementById('cot-kilos').value || null,
             carguera_id: parseInt(document.getElementById('cot-carguera').value, 10),
             aerolinea_id: parseInt(document.getElementById('cot-aerolinea').value, 10),
-            origen_airport_id: parseInt(document.getElementById('cot-origen').value, 10),
-            destino_airport_id: parseInt(document.getElementById('cot-destino').value, 10),
+            origen_airport_id: parseInt(document.getElementById('cot-origen-id').value, 10),
+            destino_airport_id: parseInt(document.getElementById('cot-destino-id').value, 10),
             fecha_proyeccion: document.getElementById('cot-fecha').value
         };
     }

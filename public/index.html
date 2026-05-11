@@ -499,69 +499,122 @@
                                 </div>
                             </div>
 
-                            <!-- Modo Calcular -->
+                            <!-- Modo Calcular · PR-5a rediseño "asistente inteligente" -->
                             <div id="cot-mode-calcular" class="cot-mode-pane active">
                                 <div class="cotizador-grid">
                                     <form id="cotizador-form" class="cotizador-form card">
-                                        <h3>Datos del pedido</h3>
 
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="cot-tallos">Cantidad de tallos *</label>
-                                                <input type="number" id="cot-tallos" min="1" required value="10000">
+                                        <!-- Sección 1: Ruta de vuelo -->
+                                        <div class="cot-section">
+                                            <div class="cot-section-title">
+                                                <span class="cot-section-num">1</span>
+                                                <span>Ruta de vuelo</span>
                                             </div>
-                                            <div class="form-group">
-                                                <label for="cot-tallos-caja">Tallos por caja *</label>
-                                                <input type="number" id="cot-tallos-caja" min="1" required value="250">
+                                            <div class="cot-route-row">
+                                                <div class="cot-airport-field" data-airport-role="origen">
+                                                    <label>Origen</label>
+                                                    <div class="cot-airport-input" tabindex="0" data-airport-input>
+                                                        <div class="cot-airport-selected">
+                                                            <span class="cot-airport-text">Seleccioná...</span>
+                                                        </div>
+                                                        <svg class="cot-airport-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                                    </div>
+                                                    <input type="hidden" id="cot-origen-id">
+                                                    <div class="cot-airport-dropdown" data-airport-dropdown>
+                                                        <input type="text" class="cot-airport-search" placeholder="Escribe ciudad, aeropuerto o código...">
+                                                        <div class="cot-airport-results"></div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="cot-route-arrow">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                                                </div>
+
+                                                <div class="cot-airport-field" data-airport-role="destino">
+                                                    <label>Destino</label>
+                                                    <div class="cot-airport-input" tabindex="0" data-airport-input>
+                                                        <div class="cot-airport-selected">
+                                                            <span class="cot-airport-text">Seleccioná...</span>
+                                                        </div>
+                                                        <svg class="cot-airport-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                                    </div>
+                                                    <input type="hidden" id="cot-destino-id">
+                                                    <div class="cot-airport-dropdown" data-airport-dropdown>
+                                                        <input type="text" class="cot-airport-search" placeholder="Escribe ciudad, aeropuerto o código...">
+                                                        <div class="cot-airport-results"></div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="cot-precio-1">Precio FOB tallo — Escenario 1 *</label>
-                                                <input type="number" id="cot-precio-1" min="0" step="0.01" required value="0.95">
+                                        <!-- Sección 2: Carguera y tarifa -->
+                                        <div class="cot-section">
+                                            <div class="cot-section-title">
+                                                <span class="cot-section-num">2</span>
+                                                <span>Carguera y tarifa</span>
                                             </div>
-                                            <div class="form-group">
-                                                <label for="cot-precio-2">Precio FOB tallo — Escenario 2 *</label>
-                                                <input type="number" id="cot-precio-2" min="0" step="0.01" required value="0.65">
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="cot-carguera">Carguera *</label>
+                                                    <select id="cot-carguera" required></select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="cot-aerolinea">Aerolínea *</label>
+                                                    <select id="cot-aerolinea" required></select>
+                                                </div>
                                             </div>
+                                            <div id="cot-tarifa-card" class="cot-tarifa-card" style="display:none;"></div>
                                         </div>
 
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="cot-kilos">Kilos totales (opcional)</label>
-                                                <input type="number" id="cot-kilos" min="0" step="0.01" placeholder="Vacío = se usa 0.056 kg/tallo">
+                                        <!-- Sección 3: Datos del pedido -->
+                                        <div class="cot-section">
+                                            <div class="cot-section-title">
+                                                <span class="cot-section-num">3</span>
+                                                <span>Datos del pedido</span>
                                             </div>
-                                            <div class="form-group">
-                                                <label for="cot-fecha">Fecha de proyección *</label>
-                                                <input type="date" id="cot-fecha" required>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="cot-tallos">¿Cuántos tallos vas a enviar?</label>
+                                                    <input type="number" id="cot-tallos" min="1" required placeholder="Ej. 10.000">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="cot-tallos-caja">¿Cuántos tallos caben en cada caja?</label>
+                                                    <input type="number" id="cot-tallos-caja" min="1" required placeholder="250">
+                                                </div>
                                             </div>
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="cot-precio-1">Precio por tallo — Escenario bajo</label>
+                                                    <div class="cot-money-input">
+                                                        <span>$</span>
+                                                        <input type="number" id="cot-precio-1" min="0" step="0.01" required placeholder="0.65">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="cot-precio-2">Precio por tallo — Escenario alto</label>
+                                                    <div class="cot-money-input">
+                                                        <span>$</span>
+                                                        <input type="number" id="cot-precio-2" min="0" step="0.01" required placeholder="0.95">
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Peso colapsable -->
+                                            <details class="cot-weight-collapsible">
+                                                <summary>
+                                                    <span class="cot-weight-summary-text">Peso del envío (opcional)</span>
+                                                    <span class="cot-weight-estimate" id="cot-weight-estimate"></span>
+                                                </summary>
+                                                <div class="cot-weight-body">
+                                                    <label for="cot-kilos">Peso real en kilogramos</label>
+                                                    <input type="number" id="cot-kilos" min="0" step="0.01" placeholder="Vacío = se calcula con 0,056 kg/tallo">
+                                                    <input type="hidden" id="cot-fecha">
+                                                </div>
+                                            </details>
                                         </div>
 
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="cot-carguera">Carguera *</label>
-                                                <select id="cot-carguera" required></select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="cot-aerolinea">Aerolínea *</label>
-                                                <select id="cot-aerolinea" required></select>
-                                            </div>
-                                        </div>
-
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="cot-origen">Aeropuerto origen *</label>
-                                                <select id="cot-origen" required></select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="cot-destino">Aeropuerto destino *</label>
-                                                <select id="cot-destino" required></select>
-                                            </div>
-                                        </div>
-
-                                        <div class="form-actions">
-                                            <button type="submit" class="btn btn-primary">Calcular</button>
+                                        <div class="form-actions cot-actions">
+                                            <button type="submit" class="btn btn-primary cot-calc-btn" id="cot-calc-btn">Calcular Landed Cost</button>
                                             <button type="button" class="btn btn-outline" id="cot-guardar-btn" disabled>Guardar cotización</button>
                                         </div>
                                     </form>

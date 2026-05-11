@@ -193,3 +193,306 @@
     color: #9ca3af;
     font-style: italic;
 }
+
+/* ==========================================================================
+   PR-5a · Rediseño "asistente inteligente"
+   ========================================================================== */
+
+/* Secciones numeradas (1·Ruta, 2·Carguera, 3·Datos) */
+.cot-section {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.cot-section:last-of-type { border-bottom: none; }
+.cot-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-1);
+    margin-bottom: 0.85rem;
+}
+.cot-section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--gradient-brand);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+/* Sección 1 · ruta de vuelo con autocomplete */
+.cot-route-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.5rem;
+    align-items: end;
+}
+.cot-airport-field {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.cot-airport-field label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.cot-airport-input {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 0.85rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+    min-height: 44px;
+}
+.cot-airport-input:hover { border-color: var(--primary); }
+.cot-airport-field.open .cot-airport-input {
+    border-color: var(--primary);
+    background: var(--bg-elevated);
+}
+.cot-airport-selected {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    color: var(--text-1);
+}
+.cot-airport-selected.placeholder { color: var(--text-3); }
+.cot-airport-chev {
+    width: 16px; height: 16px;
+    color: var(--text-3);
+    transition: transform var(--transition-fast);
+}
+.cot-airport-field.open .cot-airport-chev { transform: rotate(180deg); }
+
+.cot-airport-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    margin-top: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    max-height: 360px;
+    display: none;
+    flex-direction: column;
+}
+.cot-airport-field.open .cot-airport-dropdown { display: flex; }
+.cot-airport-search {
+    width: 100%;
+    padding: 0.7rem 0.85rem !important;
+    border: none !important;
+    border-bottom: 1px solid var(--border) !important;
+    background: var(--bg-card) !important;
+    color: var(--text-1) !important;
+    font-size: 0.88rem;
+    outline: none !important;
+    border-radius: 0 !important;
+}
+.cot-airport-results {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 300px;
+}
+.cot-airport-result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background var(--transition-fast);
+}
+.cot-airport-result:last-child { border-bottom: none; }
+.cot-airport-result:hover { background: rgba(99, 102, 241, 0.08); }
+.cot-airport-result-main { flex: 1; min-width: 0; }
+.cot-airport-result-name {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cot-airport-result-location {
+    font-size: 0.76rem;
+    color: var(--text-3);
+    margin-top: 1px;
+}
+.cot-airport-result-iata {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--primary-light);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 0.18rem 0.55rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+}
+.cot-airport-no-results {
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-3);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+.cot-route-arrow {
+    color: var(--primary-light);
+    padding-bottom: 0.65rem;
+}
+.cot-route-arrow svg { width: 22px; height: 22px; }
+
+/* Sección 2 · tarjeta de tarifa vigente */
+.cot-tarifa-card {
+    margin-top: 0.85rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid;
+    background: rgba(99, 102, 241, 0.08);
+    border-color: rgba(99, 102, 241, 0.25);
+    color: var(--text-1);
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+.cot-tarifa-card.warning {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.25);
+    color: #fca5a5;
+}
+.cot-tarifa-card .cot-tarifa-rate {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--primary-light);
+    margin-right: 0.5rem;
+}
+.cot-tarifa-card.warning .cot-tarifa-rate { color: #fca5a5; }
+.cot-tarifa-card .cot-tarifa-meta {
+    color: var(--text-3);
+    font-size: 0.78rem;
+    margin-top: 0.25rem;
+}
+
+/* Sección 3 · campos con símbolo $ y peso colapsable */
+.cot-money-input {
+    display: flex;
+    align-items: center;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: border-color var(--transition-fast);
+}
+.cot-money-input:focus-within { border-color: var(--primary); }
+.cot-money-input > span {
+    padding: 0 0.65rem;
+    color: var(--text-3);
+    font-weight: 700;
+}
+.cot-money-input input {
+    flex: 1;
+    border: none !important;
+    background: transparent !important;
+    padding: 0.65rem 0.65rem 0.65rem 0 !important;
+    color: var(--text-1) !important;
+    outline: none !important;
+}
+
+.cot-weight-collapsible {
+    margin-top: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow: hidden;
+}
+.cot-weight-collapsible > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.65rem 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.86rem;
+    color: var(--text-2);
+    user-select: none;
+}
+.cot-weight-collapsible > summary::-webkit-details-marker { display: none; }
+.cot-weight-collapsible > summary::before {
+    content: "▸";
+    color: var(--text-3);
+    transition: transform var(--transition-fast);
+    display: inline-block;
+}
+.cot-weight-collapsible[open] > summary::before { transform: rotate(90deg); }
+.cot-weight-summary-text { flex: 1; }
+.cot-weight-estimate {
+    color: var(--text-3);
+    font-size: 0.78rem;
+    font-style: italic;
+}
+.cot-weight-body {
+    padding: 0.85rem;
+    border-top: 1px solid var(--border);
+}
+.cot-weight-body label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-3);
+    margin-bottom: 0.3rem;
+}
+
+/* Botón principal Calcular Landed Cost */
+.cot-actions { margin-top: 1.25rem; }
+.cot-calc-btn {
+    flex: 1;
+    min-height: 48px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+.cot-calc-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: var(--bg-elevated) !important;
+    color: var(--text-3) !important;
+}
+
+/* Light mode overrides */
+@media (prefers-color-scheme: light) {
+    .cot-tarifa-card {
+        background: rgba(99, 102, 241, 0.06) !important;
+        border-color: rgba(99, 102, 241, 0.25) !important;
+    }
+    .cot-tarifa-card .cot-tarifa-rate { color: var(--primary-dark) !important; }
+    .cot-tarifa-card.warning {
+        background: rgba(239, 68, 68, 0.06) !important;
+        color: #b91c1c !important;
+    }
+    .cot-tarifa-card.warning .cot-tarifa-rate { color: #b91c1c !important; }
+    .cot-airport-result-iata {
+        background: rgba(99, 102, 241, 0.10) !important;
+        color: var(--primary-dark) !important;
+        border-color: rgba(99, 102, 241, 0.30) !important;
+    }
+}
