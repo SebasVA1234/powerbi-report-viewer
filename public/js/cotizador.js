@@ -409,53 +409,139 @@
     function renderEmpty() {
         const cont = document.getElementById('cotizador-resultado');
         if (cont && !lastResult) {
-            cont.innerHTML = '<h3>Resultado</h3><div class="empty">Llena el formulario y haz click en <strong>Calcular</strong>.</div>';
+            cont.innerHTML = `
+                <div class="cot-result-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="opacity:0.4; margin-bottom:1rem;">
+                        <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                        <line x1="9" y1="9" x2="15" y2="9"></line>
+                        <line x1="9" y1="13" x2="15" y2="13"></line>
+                        <line x1="9" y1="17" x2="13" y2="17"></line>
+                    </svg>
+                    <p>Completá el formulario y hacé click en <strong>Calcular Landed Cost</strong>.</p>
+                    <p class="cot-result-empty-sub">El resultado aparecerá acá con la comparación de los 2 escenarios.</p>
+                </div>
+            `;
         }
     }
 
+    // PR-5b: render del resultado con animación de entrada, cabecera prominente
+    // con ruta grande, tarjetas comparativas con íconos por concepto, y 3
+    // botones de acción (Guardar / Exportar PDF / Nueva).
     function renderResult(data) {
         const cont = document.getElementById('cotizador-resultado');
         if (!cont) return;
-        const m = data.metadata;
+        const m  = data.metadata;
         const e1 = data.escenarios.escenario_1;
         const e2 = data.escenarios.escenario_2;
 
-        const escenarioBlock = (e, label, klass) => `
-            <div class="cot-escenario ${klass}">
-                <div class="head">
-                    <span>${label}</span>
-                    <span>${fmtMoney(e.precio_fob_tallo)}/tallo</span>
+        const ICONS = {
+            fob:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+            flete:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"></path><path d="M21 3l-7 7"></path><path d="M8 21H3v-5"></path><path d="M3 21l7-7"></path></svg>',
+            fijos:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="9" x2="15" y2="9"></line></svg>',
+            transp:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>',
+            frio:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="5" y1="5" x2="19" y2="19"></line><line x1="19" y1="5" x2="5" y2="19"></line></svg>',
+            imp:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2"></path><path d="M9 11V7a3 3 0 1 1 6 0v4"></path></svg>'
+        };
+
+        const row = (icon, label, value) => `
+            <div class="cot-result-row">
+                <span class="cot-result-icon">${icon}</span>
+                <span class="cot-result-label">${label}</span>
+                <span class="cot-result-value">${value}</span>
+            </div>`;
+
+        const escenarioBlock = (e, label, variant) => `
+            <div class="cot-escenario ${variant}">
+                <div class="cot-escenario-head">
+                    <span class="cot-escenario-label">${label}</span>
+                    <span class="cot-escenario-fob">${fmtMoney(e.precio_fob_tallo)}/tallo</span>
                 </div>
-                <div class="body">
-                    <div class="row"><span class="lbl">FOB total</span><span class="val">${fmtMoney(e.desglose_totales.fob_total)}</span></div>
-                    <div class="row"><span class="lbl">Flete</span><span class="val">${fmtMoney(e.desglose_totales.costo_flete)}</span></div>
-                    <div class="row"><span class="lbl">Costos fijos</span><span class="val">${fmtMoney(e.desglose_totales.costos_fijos)}</span></div>
-                    <div class="row"><span class="lbl">Transporte interno</span><span class="val">${fmtMoney(e.desglose_totales.transporte_interno)}</span></div>
-                    ${e.desglose_totales.cuarto_frio ? `<div class="row"><span class="lbl">Cuarto frío</span><span class="val">${fmtMoney(e.desglose_totales.cuarto_frio)}</span></div>` : ''}
-                    <div class="row"><span class="lbl">Impuestos</span><span class="val">${fmtMoney(e.desglose_totales.impuestos)}</span></div>
-                    <div class="row total"><span class="lbl">Gran total</span><span class="val">${fmtMoney(e.desglose_totales.gran_total)}</span></div>
+                <div class="cot-escenario-body">
+                    ${row(ICONS.fob,    'Precio FOB total',     fmtMoney(e.desglose_totales.fob_total))}
+                    ${row(ICONS.flete,  'Costo de flete',       fmtMoney(e.desglose_totales.costo_flete))}
+                    ${row(ICONS.fijos,  'Costos fijos (doc + aduana)', fmtMoney(e.desglose_totales.costos_fijos))}
+                    ${row(ICONS.transp, 'Transporte interno',   fmtMoney(e.desglose_totales.transporte_interno))}
+                    ${e.desglose_totales.cuarto_frio ? row(ICONS.frio, 'Cuarto frío', fmtMoney(e.desglose_totales.cuarto_frio)) : ''}
+                    ${e.desglose_totales.impuestos > 0 ? row(ICONS.imp, 'Impuestos y aranceles', fmtMoney(e.desglose_totales.impuestos)) : ''}
                 </div>
-                <div class="cot-landed">Landed cost / tallo: ${fmtMoney(e.landed_cost_por_tallo)}</div>
+                <div class="cot-escenario-totals">
+                    <div class="cot-total-line">
+                        <span>Landed Cost Total</span>
+                        <strong>${fmtMoney(e.desglose_totales.gran_total)}</strong>
+                    </div>
+                    <div class="cot-total-line per-stem">
+                        <span>Por tallo</span>
+                        <strong>${fmtMoney(e.landed_cost_por_tallo)}</strong>
+                    </div>
+                </div>
             </div>
         `;
 
         cont.innerHTML = `
-            <h3>Resultado</h3>
-            <div class="cot-meta-grid">
-                <div class="cot-meta-item"><div class="label">Tallos</div><div class="value">${m.cantidad_tallos.toLocaleString()}</div></div>
-                <div class="cot-meta-item"><div class="label">Cajas</div><div class="value">${m.numero_cajas}</div></div>
-                <div class="cot-meta-item"><div class="label">Kilos</div><div class="value">${fmtNum(m.kilos_calculados, 2)}</div></div>
-                <div class="cot-meta-item"><div class="label">Tarifa flete</div><div class="value">${fmtMoney(m.tarifa_flete_aplicada)}/kg</div></div>
-                <div class="cot-meta-item"><div class="label">Ruta</div><div class="value">${escapeHtml(m.origen.iata)} → ${escapeHtml(m.destino.iata)}</div></div>
-                <div class="cot-meta-item"><div class="label">Destino</div><div class="value">${escapeHtml(m.destino.ciudad)}, ${escapeHtml(m.destino.pais)}</div></div>
-                <div class="cot-meta-item"><div class="label">Tipo</div><div class="value">${escapeHtml(m.tariff_type || 'contract')}</div></div>
-                <div class="cot-meta-item"><div class="label">Fecha</div><div class="value">${escapeHtml(m.fecha_proyeccion)}</div></div>
-            </div>
-            <div class="cot-escenarios">
-                ${escenarioBlock(e1, 'Escenario 1', 'e1')}
-                ${escenarioBlock(e2, 'Escenario 2', 'e2')}
+            <div class="cot-result-block">
+                <div class="cot-result-header">
+                    <div class="cot-result-route">
+                        <span class="cot-result-route-iata">${escapeHtml(m.origen.iata)}</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                        <span class="cot-result-route-iata">${escapeHtml(m.destino.iata)}</span>
+                    </div>
+                    <div class="cot-result-meta">
+                        <div><span class="lbl">Destino</span> ${escapeHtml(m.destino.ciudad)}, ${escapeHtml(m.destino.pais)}</div>
+                        <div><span class="lbl">Cajas</span> ${m.numero_cajas} · <span class="lbl">Tallos</span> ${m.cantidad_tallos.toLocaleString()}</div>
+                        <div><span class="lbl">Fecha cálculo</span> ${escapeHtml(m.fecha_proyeccion)}</div>
+                    </div>
+                </div>
+                <div class="cot-escenarios">
+                    ${escenarioBlock(e1, 'Escenario bajo', 'low')}
+                    ${escenarioBlock(e2, 'Escenario alto', 'high')}
+                </div>
+                <p class="cot-result-footnote">
+                    Tarifa aplicada: <strong>${fmtMoney(m.tarifa_flete_aplicada)}/kg</strong> ·
+                    Tipo: ${escapeHtml(m.tariff_type || 'contract')} ·
+                    Factor de conversión: ${m.factor_conversion_usado || '0.056 kg/tallo'} ·
+                    Kilos: ${fmtNum(m.kilos_calculados, 2)}
+                </p>
+                <div class="cot-result-actions">
+                    <button type="button" class="btn btn-primary" id="cot-action-save">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                        Guardar cotización
+                    </button>
+                    <button type="button" class="btn btn-outline" id="cot-action-pdf" disabled title="Próximamente: PR-5c">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Exportar PDF
+                    </button>
+                    <button type="button" class="btn btn-outline" id="cot-action-new">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        Nueva cotización
+                    </button>
+                </div>
             </div>
         `;
+
+        // Wire de los 3 botones de acción
+        document.getElementById('cot-action-save').onclick = onGuardar;
+        document.getElementById('cot-action-new').onclick = onNuevaCotizacion;
+    }
+
+    // PR-5b: limpiar el form + zona de resultado para empezar de cero.
+    // No toca cargueras/aerolíneas/aeropuertos (los selectos quedan con la
+    // selección actual — el usuario suele cotizar varios pedidos a la misma
+    // ruta). Sólo limpia los 4 campos de pedido + peso manual.
+    function onNuevaCotizacion() {
+        document.getElementById('cot-tallos').value = '';
+        document.getElementById('cot-tallos-caja').value = '';
+        document.getElementById('cot-precio-1').value = '';
+        document.getElementById('cot-precio-2').value = '';
+        document.getElementById('cot-kilos').value = '';
+        const collapsable = document.querySelector('.cot-weight-collapsible');
+        if (collapsable) collapsable.open = false;
+        updateWeightEstimate();
+        updateCalcButtonState();
+        lastResult = null;
+        const btnGuardar = document.getElementById('cot-guardar-btn');
+        if (btnGuardar) btnGuardar.disabled = true;
+        renderEmpty();
+        document.getElementById('cot-tallos').focus();
     }
 
     async function loadCotizacionesHistorico() {

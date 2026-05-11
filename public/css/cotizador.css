@@ -478,6 +478,189 @@
     color: var(--text-3) !important;
 }
 
+/* ==========================================================================
+   PR-5b · Zona de resultado pulida
+   ========================================================================== */
+
+/* Estado vacío inicial */
+.cot-result-empty {
+    text-align: center;
+    padding: 3rem 1.5rem;
+    color: var(--text-3);
+}
+.cot-result-empty p { margin: 0.4rem 0; }
+.cot-result-empty-sub { font-size: 0.82rem; opacity: 0.7; }
+
+/* Bloque entero del resultado con animación de entrada */
+.cot-result-block {
+    animation: cotResultIn 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes cotResultIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to   { opacity: 1; transform: translateX(0);    }
+}
+
+/* Cabecera con ruta grande UIO → MIA */
+.cot-result-header {
+    padding: 1.25rem;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.10), rgba(16, 185, 129, 0.08));
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+}
+.cot-result-route {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    margin-bottom: 0.65rem;
+}
+.cot-result-route-iata {
+    font-size: 1.85rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: var(--text-1);
+    background: linear-gradient(135deg, var(--primary-light), var(--accent-light));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.cot-result-route svg { color: var(--primary-light); }
+.cot-result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    font-size: 0.82rem;
+    color: var(--text-2);
+}
+.cot-result-meta .lbl {
+    color: var(--text-3);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+    margin-right: 0.25rem;
+}
+
+/* Tarjetas comparativas — escenario bajo (azul) y alto (verde) */
+.cot-escenarios {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+}
+@media (max-width: 700px) { .cot-escenarios { grid-template-columns: 1fr; } }
+
+.cot-escenario {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    transition: transform 200ms, box-shadow 200ms;
+}
+.cot-escenario:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+.cot-escenario-head {
+    padding: 0.85rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: white;
+}
+.cot-escenario.low  .cot-escenario-head { background: linear-gradient(135deg, #3b82f6, #6366f1); }
+.cot-escenario.high .cot-escenario-head { background: linear-gradient(135deg, #10b981, #059669); }
+.cot-escenario-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    opacity: 0.92;
+}
+.cot-escenario-fob {
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.cot-escenario-body { padding: 0.4rem 0; }
+.cot-result-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    color: var(--text-2);
+    border-bottom: 1px dashed rgba(148, 163, 184, 0.10);
+}
+.cot-result-row:last-child { border-bottom: none; }
+.cot-result-icon {
+    color: var(--text-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.cot-result-icon svg { width: 16px; height: 16px; }
+.cot-result-label { color: var(--text-2); }
+.cot-result-value { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.cot-escenario-totals {
+    padding: 0.85rem 1rem;
+    background: rgba(99, 102, 241, 0.08);
+    border-top: 1px solid var(--border);
+}
+.cot-escenario.high .cot-escenario-totals { background: rgba(16, 185, 129, 0.10); }
+.cot-total-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.85rem;
+    color: var(--text-2);
+}
+.cot-total-line strong {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+}
+.cot-total-line.per-stem {
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.20);
+    font-size: 0.78rem;
+}
+.cot-total-line.per-stem strong {
+    font-size: 0.95rem;
+    color: var(--primary-light);
+}
+.cot-escenario.high .cot-total-line.per-stem strong { color: var(--accent-light); }
+
+/* Pie de nota: tarifa, factor conversion, kilos */
+.cot-result-footnote {
+    margin: 0.85rem 0;
+    padding: 0.65rem 0.85rem;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-3);
+    line-height: 1.5;
+}
+.cot-result-footnote strong { color: var(--text-2); }
+
+/* Acciones: Guardar / Exportar PDF / Nueva */
+.cot-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+.cot-result-actions .btn {
+    flex: 1 1 160px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.7rem 1rem !important;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
 /* Light mode overrides */
 @media (prefers-color-scheme: light) {
     .cot-tarifa-card {
@@ -495,4 +678,17 @@
         color: var(--primary-dark) !important;
         border-color: rgba(99, 102, 241, 0.30) !important;
     }
+    .cot-result-header {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(16, 185, 129, 0.05)) !important;
+    }
+    .cot-result-route-iata {
+        background: linear-gradient(135deg, var(--primary-dark), #047857) !important;
+        -webkit-background-clip: text !important;
+        background-clip: text !important;
+    }
+    .cot-escenario { background: #ffffff !important; }
+    .cot-escenario-totals { background: rgba(99, 102, 241, 0.04) !important; }
+    .cot-escenario.high .cot-escenario-totals { background: rgba(16, 185, 129, 0.06) !important; }
+    .cot-total-line.per-stem strong { color: var(--primary-dark) !important; }
+    .cot-escenario.high .cot-total-line.per-stem strong { color: #047857 !important; }
 }
