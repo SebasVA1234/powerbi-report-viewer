@@ -358,6 +358,11 @@ button.btn-primary {
     background: var(--bg-input) !important;
     border: 1px solid var(--border) !important;
     border-radius: var(--radius-pill) !important;
+    /* CRÍTICO: la regla global input[type="text"]{padding: 0.7rem 0.9rem !important}
+       de la línea 191 anulaba el padding-left de 44px del search-box, haciendo
+       que el ícono de lupa se superpusiera con el placeholder "Buscar reportes...".
+       Restablecemos el padding asimétrico para dejar espacio al SVG absolute. */
+    padding-left: 44px !important;
 }
 .search-box input:focus {
     border-color: var(--primary) !important;
