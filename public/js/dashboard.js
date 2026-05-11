@@ -242,6 +242,13 @@ function showSection(sectionName) {
         if (activeLink) {
             activeLink.classList.add('active');
         }
+        // El buscador del topbar es para reportes — sólo tiene sentido en la
+        // sección "reports" (Inicio). En cualquier otra pantalla aparece pero
+        // no filtra nada, así que lo ocultamos para no confundir al usuario.
+        const searchBox = document.querySelector('.topbar .search-box');
+        if (searchBox) {
+            searchBox.style.visibility = sectionName === 'reports' ? 'visible' : 'hidden';
+        }
         switch (sectionName) {
             case 'reports': loadMyReports(); break;
             case 'documents':

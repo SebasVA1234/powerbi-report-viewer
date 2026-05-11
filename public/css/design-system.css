@@ -201,10 +201,13 @@ textarea, select,
     font-size: 0.9rem !important;
     transition: all var(--transition-fast);
 }
+/* Focus ring sutil — antes era rgba(...0.2) con 3px que se veía como
+   "halo violeta intenso" sobre cada input. Ahora es 2px y 0.08 de alpha
+   para mantener accesibilidad sin distraer. */
 input:focus, textarea:focus, select:focus {
     outline: none !important;
     border-color: var(--primary) !important;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.08) !important;
     background: var(--bg-elevated) !important;
 }
 input::placeholder, textarea::placeholder {
@@ -468,8 +471,13 @@ button.btn-primary {
     border-bottom: 1px solid var(--border) !important;
     color: var(--text-1) !important;
 }
-.data-table tr:hover td {
-    background: var(--bg-hover) !important;
+/* Hover de fila — usar tint violeta translúcido NO un bg claro. styles.css
+   y admin.css definían --bg-secondary/--gray-50 (claros), que en dark mode
+   sobreescribían el bg del row y hacían el texto blanco ilegible. */
+.data-table tbody tr:hover,
+.data-table tbody tr:hover td {
+    background: rgba(99, 102, 241, 0.10) !important;
+    color: var(--text-1) !important;
 }
 .data-table tr:last-child td {
     border-bottom: none !important;
