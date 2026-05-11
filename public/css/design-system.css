@@ -2048,6 +2048,35 @@ input[type="file"]::file-selector-button:hover {
     font-weight: 700;
 }
 
+/* --- PR-4: campos en grid para datos básicos + RRHH --- */
+.perm-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+}
+.perm-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.perm-field > span {
+    font-size: 0.78rem;
+    color: var(--text-3);
+    font-weight: 600;
+}
+.perm-field input,
+.perm-field select,
+.perm-field textarea {
+    width: 100%;
+    padding: 0.55rem 0.7rem !important;
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--text-1) !important;
+    font-size: 0.88rem;
+}
+.perm-field textarea { resize: vertical; min-height: 60px; }
+
 /* --- Grid de departamentos (checkboxes) --- */
 .dept-grid {
     display: grid;

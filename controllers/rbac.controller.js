@@ -317,16 +317,30 @@ class RbacController {
     static async getUserContextById(req, res) {
         try {
             const { id } = req.params;
-            const user = await db.queryOne('SELECT id, username, email, full_name FROM users WHERE id = ?', [id]);
+            // PR-4: el modal unificado "Editar persona" pide TODO de una vez —
+            // user + estado cuenta + RRHH + roles + departamentos + permisos.
+            const user = await db.queryOne(
+                `SELECT id, username, email, full_name, role, is_active, must_change_password
+                 FROM users WHERE id = ?`,
+                [id]
+            );
             if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
             const ctx = await getUserContext(user.id);
+            // Datos RRHH (puede no existir si nunca se autocreó o se borró)
+            const hr = await db.queryOne(
+                `SELECT id, full_name, doc_id, email_personal, phone, position_id,
+                        department_id, manager_id, hire_date, status, address, notes
+                 FROM hr_employees WHERE user_id = ?`,
+                [id]
+            );
             res.json({
                 success: true,
                 data: {
                     user,
                     roles: ctx.roles,
                     departments: ctx.departments,
-                    permissions: Array.from(ctx.permissions)
+                    permissions: Array.from(ctx.permissions),
+                    hr_employee: hr || null
                 }
             });
         } catch (err) {

@@ -175,6 +175,13 @@ const hrAdmin = (function () {
                 const incompleteBadge = incomplete
                     ? `<span class="badge badge-incomplete" title="Faltan cargo, documento o fecha de ingreso">Perfil incompleto</span>`
                     : '';
+                // PR-4: si el empleado tiene user vinculado, el botón "Editar"
+                // abre el modal unificado en Administración (con permisos +
+                // datos RRHH en una sola UI). Si no tiene user, fallback al
+                // modal viejo solo-RRHH (caso edge: empleado sin login).
+                const editAction = e.user_id
+                    ? `openUserPermissions(${e.user_id})`
+                    : `hrAdmin.editEmployee(${e.id})`;
                 return `
                 <tr>
                     <td>
@@ -187,7 +194,7 @@ const hrAdmin = (function () {
                     <td><span class="badge ${e.status === 'active' ? 'badge-success' : 'badge-danger'}">${escapeHtml(e.status)}</span></td>
                     <td>${escapeHtml(fmtDate(e.hire_date) || '-')}</td>
                     <td>
-                        <button class="btn-edit" onclick="hrAdmin.editEmployee(${e.id})">${incomplete ? 'Completar' : 'Editar'}</button>
+                        <button class="btn-edit" onclick="${editAction}">${incomplete ? 'Completar' : 'Editar'}</button>
                         <button class="btn-edit" onclick="hrAdmin.viewBalance(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Saldo</button>
                         <button class="btn-delete" onclick="hrAdmin.deleteEmployee(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Eliminar</button>
                     </td>

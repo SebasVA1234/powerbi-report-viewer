@@ -358,13 +358,11 @@
                             <div id="hr-employees-tab" class="tab-content">
                                 <div class="tab-header">
                                     <h3>Empleados</h3>
-                                    <div style="display:flex; gap:0.5rem;">
-                                        <button class="btn btn-outline" onclick="hrAdmin.syncFromUsers()" title="Crea perfiles RRHH para los usuarios que aún no tienen uno (perfil mínimo, completá los datos después)">
-                                            ↻ Sincronizar desde Usuarios
-                                        </button>
-                                        <button class="btn btn-primary" onclick="hrAdmin.openCreateEmployee()">+ Nuevo Empleado</button>
-                                    </div>
+                                    <button class="btn btn-primary" onclick="hrAdmin.openCreateEmployee()">+ Nuevo Empleado</button>
                                 </div>
+                                <p style="color:var(--text-3); font-size:0.85rem; margin-bottom:0.85rem;">
+                                    Vista de equipo con datos contractuales. Para editar permisos, cargo, o cualquier dato del empleado, usá el botón ✏️ — abre la ficha completa en Administración › Personal.
+                                </p>
                                 <div class="rbac-filter-row">
                                     <label>Departamento:</label>
                                     <select id="hr-emp-dept-filter" onchange="hrAdmin.loadEmployees()">
@@ -670,7 +668,7 @@
                                         <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
                                         <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                                     </svg>
-                                    Usuarios
+                                    Personal
                                 </button>
                                 <button class="tab-btn" data-tab="departments">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
@@ -717,7 +715,7 @@
                             <!-- Tab: Usuarios -->
                             <div id="users-tab" class="tab-content active">
                                 <div class="tab-header">
-                                    <h3>Gestión de Usuarios</h3>
+                                    <h3>Personal</h3>
                                     <button class="btn btn-primary" onclick="showCreateUserModal()">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                                             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1125,11 +1123,14 @@
             </div>
         </div>
 
-        <!-- PR-2d: Modal Permisos por Usuario (botón engranaje verde de la tabla) -->
+        <!-- PR-2d + PR-4: Modal unificado "Editar persona" — combina cuenta,
+             permisos, datos RRHH y acciones administrativas en un solo lugar.
+             Reemplaza el flujo de "Admin > Usuarios" + "RRHH > Empleados" como
+             dos pantallas separadas. -->
         <div id="user-permissions-modal" class="modal user-perm-modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Permisos del usuario</h3>
+                    <h3>Editar persona</h3>
                     <button class="btn-close" onclick="closeModal('user-permissions-modal')">&times;</button>
                 </div>
 
@@ -1150,19 +1151,43 @@
                     </div>
                 </div>
 
-                <!-- Tabs internas -->
+                <!-- Tabs internas — PR-4 las amplía a 4 (datos básicos + permisos + RRHH + cuenta) -->
                 <div class="user-perm-tabs">
-                    <button class="user-perm-tab active" data-perm-tab="summary">Resumen</button>
-                    <button class="user-perm-tab" data-perm-tab="effective">Permisos efectivos</button>
+                    <button class="user-perm-tab active" data-perm-tab="basic">Datos básicos</button>
+                    <button class="user-perm-tab" data-perm-tab="summary">Permisos</button>
+                    <button class="user-perm-tab" data-perm-tab="hr">Datos RRHH</button>
                     <button class="user-perm-tab" data-perm-tab="account">Cuenta</button>
                 </div>
 
                 <form id="user-perm-form">
                     <input type="hidden" id="user-perm-userid">
                     <input type="hidden" id="user-perm-is-admin" value="0">
+                    <input type="hidden" id="user-perm-hr-employee-id">
 
-                    <!-- Pane: Resumen (rol + departamentos) -->
-                    <div class="user-perm-pane active" data-perm-pane="summary">
+                    <!-- Pane: Datos básicos -->
+                    <div class="user-perm-pane active" data-perm-pane="basic">
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Identidad</h4>
+                            <div class="perm-grid-2">
+                                <label class="perm-field">
+                                    <span>Nombre completo *</span>
+                                    <input type="text" id="user-perm-fullname" required>
+                                </label>
+                                <label class="perm-field">
+                                    <span>Usuario *</span>
+                                    <input type="text" id="user-perm-username" required>
+                                </label>
+                                <label class="perm-field" style="grid-column:1/-1;">
+                                    <span>Email *</span>
+                                    <input type="email" id="user-perm-email-input" required>
+                                </label>
+                            </div>
+                            <p class="perm-section-help">Estos datos se usan para login y notificaciones.</p>
+                        </div>
+                    </div>
+
+                    <!-- Pane: Permisos (rol + departamentos + efectivos colapsado) -->
+                    <div class="user-perm-pane" data-perm-pane="summary">
                         <div class="perm-section">
                             <h4 class="perm-section-title">Rol jerárquico</h4>
                             <select id="user-perm-role" style="width:100%; padding:0.65rem; border-radius:var(--radius-md); background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-1); font-size:0.9rem;">
@@ -1178,16 +1203,59 @@
                             </div>
                             <p class="perm-section-help">Define qué documentos puede ver (filtra por departamento del documento).</p>
                         </div>
-                    </div>
 
-                    <!-- Pane: Permisos efectivos (read-only display) -->
-                    <div class="user-perm-pane" data-perm-pane="effective">
-                        <div class="perm-section">
-                            <h4 class="perm-section-title">Lo que este usuario puede hacer ahora</h4>
-                            <div class="perm-effective-grid" id="user-perm-effective">
+                        <details class="perm-section">
+                            <summary class="perm-section-title" style="cursor:pointer;">Ver permisos efectivos (avanzado)</summary>
+                            <div class="perm-effective-grid" id="user-perm-effective" style="margin-top:0.65rem;">
                                 <em style="color:var(--text-3); font-size:0.85rem; grid-column:1/-1;">Cargando permisos…</em>
                             </div>
-                            <p class="perm-section-help">Derivados del rol y departamento. Para excepciones individuales (forzar Sí/No para un permiso puntual), próximamente.</p>
+                            <p class="perm-section-help">Derivados del rol y departamento.</p>
+                        </details>
+                    </div>
+
+                    <!-- Pane: Datos RRHH -->
+                    <div class="user-perm-pane" data-perm-pane="hr">
+                        <div class="perm-section">
+                            <h4 class="perm-section-title">Datos laborales</h4>
+                            <div class="perm-grid-2">
+                                <label class="perm-field">
+                                    <span>Cargo</span>
+                                    <select id="user-perm-hr-position">
+                                        <option value="">— Sin asignar —</option>
+                                    </select>
+                                </label>
+                                <label class="perm-field">
+                                    <span>Fecha de ingreso</span>
+                                    <input type="date" id="user-perm-hr-hiredate">
+                                </label>
+                                <label class="perm-field">
+                                    <span>Documento (cédula/pasaporte)</span>
+                                    <input type="text" id="user-perm-hr-docid" placeholder="Ej. 1712345678">
+                                </label>
+                                <label class="perm-field">
+                                    <span>Teléfono</span>
+                                    <input type="tel" id="user-perm-hr-phone" placeholder="+593 ...">
+                                </label>
+                                <label class="perm-field">
+                                    <span>Email personal</span>
+                                    <input type="email" id="user-perm-hr-email" placeholder="opcional">
+                                </label>
+                                <label class="perm-field">
+                                    <span>Jefe directo</span>
+                                    <select id="user-perm-hr-manager">
+                                        <option value="">— Sin jefe asignado —</option>
+                                    </select>
+                                </label>
+                                <label class="perm-field" style="grid-column:1/-1;">
+                                    <span>Dirección</span>
+                                    <input type="text" id="user-perm-hr-address" placeholder="Calle, ciudad...">
+                                </label>
+                                <label class="perm-field" style="grid-column:1/-1;">
+                                    <span>Notas</span>
+                                    <textarea id="user-perm-hr-notes" rows="2" placeholder="Observaciones internas..."></textarea>
+                                </label>
+                            </div>
+                            <p class="perm-section-help">Información laboral del empleado. El departamento se gestiona en la pestaña "Permisos".</p>
                         </div>
                     </div>
 

@@ -57,12 +57,20 @@
 
         async loadCatalogs() {
             const headers = { Authorization: 'Bearer ' + Utils.getToken() };
-            const [rolesR, deptsR] = await Promise.all([
+            // PR-4: ahora también pre-cargamos positions (para el dropdown de
+            // cargo en datos RRHH) y la lista de empleados (para el dropdown
+            // de jefe directo). Si fallan, sus dropdowns quedan vacíos pero
+            // el modal sigue funcional.
+            const [rolesR, deptsR, posR, empR] = await Promise.all([
                 fetch('/api/rbac/roles', { headers }).then(r => r.json()),
-                fetch('/api/rbac/departments', { headers }).then(r => r.json())
+                fetch('/api/rbac/departments', { headers }).then(r => r.json()),
+                fetch('/api/hr/positions', { headers }).then(r => r.json()).catch(() => ({})),
+                fetch('/api/hr/employees', { headers }).then(r => r.json()).catch(() => ({}))
             ]);
             this.catalogRoles = (rolesR.data && rolesR.data.roles) || [];
             this.catalogDepts = (deptsR.data && deptsR.data.departments) || [];
+            this.catalogPositions = (posR.data && posR.data.positions) || [];
+            this.catalogEmployees = (empR.data && empR.data.employees) || [];
         },
 
         async loadContext() {
@@ -123,12 +131,24 @@
                 document.getElementById('user-perm-save-btn').classList.remove('btn-locked');
             }
 
-            // ---- Pane "Resumen": rol y deptos ----
+            // ---- Pane "Datos básicos" (PR-4) ----
+            document.getElementById('user-perm-fullname').value = user.full_name || '';
+            document.getElementById('user-perm-username').value = user.username || '';
+            document.getElementById('user-perm-email-input').value = user.email || '';
+            ['user-perm-fullname','user-perm-username','user-perm-email-input'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = isAdmin;
+            });
+
+            // ---- Pane "Permisos": rol y deptos ----
             this.renderRoleSelect(userRoles, isAdmin);
             this.renderDeptCheckboxes(userDepts, isAdmin);
 
-            // ---- Pane "Permisos efectivos" ----
+            // ---- Pane "Permisos efectivos" (dentro de Permisos como details) ----
             this.renderEffectivePermissions(userPerms, isAdmin);
+
+            // ---- Pane "Datos RRHH" (PR-4) ----
+            this.renderHrTab(ctx.hr_employee, isAdmin);
 
             // ---- Pane "Cuenta" ----
             this.renderAccountTab(user, isAdmin);
@@ -234,6 +254,47 @@
             }).join('');
         },
 
+        // PR-4: rellena el pane "Datos RRHH" con los datos del hr_employee
+        // (o vacío si nunca se creó). Hidrata los dropdowns de cargo y jefe
+        // directo desde los catálogos.
+        renderHrTab(hr, isAdmin) {
+            const idEl = document.getElementById('user-perm-hr-employee-id');
+            idEl.value = (hr && hr.id) || '';
+
+            // Hidratar dropdown Cargo
+            const posSelect = document.getElementById('user-perm-hr-position');
+            const currentPos = hr && hr.position_id ? Number(hr.position_id) : '';
+            posSelect.innerHTML = '<option value="">— Sin asignar —</option>' +
+                (this.catalogPositions || []).map(p =>
+                    `<option value="${p.id}" ${Number(p.id) === currentPos ? 'selected' : ''}>${escapeHtml(p.title || p.name || '')}</option>`
+                ).join('');
+
+            // Hidratar dropdown Jefe directo (otros empleados, no este mismo)
+            const mgrSelect = document.getElementById('user-perm-hr-manager');
+            const currentMgr = hr && hr.manager_id ? Number(hr.manager_id) : '';
+            const otherEmps = (this.catalogEmployees || []).filter(e => !hr || e.id !== hr.id);
+            mgrSelect.innerHTML = '<option value="">— Sin jefe asignado —</option>' +
+                otherEmps.map(e =>
+                    `<option value="${e.id}" ${Number(e.id) === currentMgr ? 'selected' : ''}>${escapeHtml(e.full_name || '')}</option>`
+                ).join('');
+
+            // Rellenar inputs simples
+            document.getElementById('user-perm-hr-hiredate').value = (hr && hr.hire_date) ? String(hr.hire_date).substring(0, 10) : '';
+            document.getElementById('user-perm-hr-docid').value    = (hr && hr.doc_id)    || '';
+            document.getElementById('user-perm-hr-phone').value    = (hr && hr.phone)     || '';
+            document.getElementById('user-perm-hr-email').value    = (hr && hr.email_personal) || '';
+            document.getElementById('user-perm-hr-address').value  = (hr && hr.address)   || '';
+            document.getElementById('user-perm-hr-notes').value    = (hr && hr.notes)     || '';
+
+            // Deshabilitar todos los inputs si es admin
+            ['user-perm-hr-position','user-perm-hr-manager','user-perm-hr-hiredate',
+             'user-perm-hr-docid','user-perm-hr-phone','user-perm-hr-email',
+             'user-perm-hr-address','user-perm-hr-notes'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = isAdmin;
+            });
+        },
+
         renderAccountTab(user, isAdmin) {
             const isActive = user.is_active !== false && user.is_active !== 0;
             const statusLabel = document.getElementById('user-perm-status-label');
@@ -274,6 +335,57 @@
 
             const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
             const operations = [];
+
+            // PR-4: Datos básicos (PUT /api/users/:id) — solo si cambió algo
+            const orig = this.currentContext.user;
+            const newFullName = document.getElementById('user-perm-fullname').value.trim();
+            const newUsername = document.getElementById('user-perm-username').value.trim();
+            const newEmail    = document.getElementById('user-perm-email-input').value.trim();
+            const basicChanged = newFullName !== (orig.full_name || '') ||
+                                 newUsername !== (orig.username || '') ||
+                                 newEmail    !== (orig.email || '');
+            if (basicChanged) {
+                operations.push({
+                    label: 'Actualizar datos básicos',
+                    run: () => fetch(`/api/users/${userId}`, {
+                        method: 'PUT', headers,
+                        body: JSON.stringify({ full_name: newFullName, username: newUsername, email: newEmail })
+                    })
+                });
+            }
+
+            // PR-4: Datos RRHH (PUT /api/hr/employees/:id o POST si no existe)
+            const hrEmpId = document.getElementById('user-perm-hr-employee-id').value;
+            const hrPayload = {
+                user_id: userId,
+                full_name: newFullName,
+                position_id: document.getElementById('user-perm-hr-position').value || null,
+                manager_id:  document.getElementById('user-perm-hr-manager').value || null,
+                hire_date:   document.getElementById('user-perm-hr-hiredate').value || null,
+                doc_id:      document.getElementById('user-perm-hr-docid').value || null,
+                phone:       document.getElementById('user-perm-hr-phone').value || null,
+                email_personal: document.getElementById('user-perm-hr-email').value || null,
+                address:     document.getElementById('user-perm-hr-address').value || null,
+                notes:       document.getElementById('user-perm-hr-notes').value || null
+            };
+            // Department_id va con el primer depto seleccionado para que filtros funcionen
+            if (selectedDepts.length > 0) hrPayload.department_id = selectedDepts[0].id;
+
+            if (hrEmpId) {
+                operations.push({
+                    label: 'Actualizar datos RRHH',
+                    run: () => fetch(`/api/hr/employees/${hrEmpId}`, {
+                        method: 'PUT', headers, body: JSON.stringify(hrPayload)
+                    })
+                });
+            } else {
+                operations.push({
+                    label: 'Crear ficha RRHH',
+                    run: () => fetch(`/api/hr/employees`, {
+                        method: 'POST', headers, body: JSON.stringify(hrPayload)
+                    })
+                });
+            }
 
             // Diff de rol: quitar el viejo si cambió, agregar el nuevo
             if (newRole !== this.originalRole) {
