@@ -94,6 +94,9 @@ class WindowManager {
                     <span class="window-title-text">${this.escapeHtml(title)}</span>
                 </div>
                 <div class="window-controls">
+                    <button class="window-btn window-btn-popout" onclick="windowManager.openInNewTab(${windowId})" title="Abrir en nueva pestaña (recomendado si el login de Microsoft no funciona dentro del marco)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    </button>
                     <button class="window-btn window-btn-minimize" onclick="windowManager.toggleMinimize(${windowId})" title="Minimizar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
@@ -107,7 +110,14 @@ class WindowManager {
             </div>
             <div class="window-body">
                 <div class="window-loading"><div class="loading-spinner"></div><span>Cargando reporte...</span></div>
-                <iframe class="window-iframe" src="${embedUrl}" allowfullscreen="true"></iframe>
+                <!-- Power BI requiere estos permisos para el OAuth popup de Microsoft.
+                     Sin allow="popups" el Sign-in del reporte queda bloqueado por Chrome.
+                     referrerpolicy explícito ayuda con redirects de login.microsoftonline.com. -->
+                <iframe class="window-iframe"
+                        src="${embedUrl}"
+                        allowfullscreen="true"
+                        allow="fullscreen; clipboard-read; clipboard-write"
+                        referrerpolicy="strict-origin-when-cross-origin"></iframe>
             </div>
             <div class="window-resize-handle" data-window-id="${windowId}"></div>
         `;
@@ -131,6 +141,15 @@ class WindowManager {
         return windowId;
     }
     
+    // Abre el reporte en una pestaña nueva del browser. Fallback útil cuando
+    // el OAuth de Microsoft falla dentro del iframe (cookies de terceros
+    // bloqueadas por Chrome). En la pestaña nueva el usuario sí puede loguearse.
+    openInNewTab(windowId) {
+        const win = this.windows.get(windowId);
+        if (!win) return;
+        window.open(win.embedUrl, '_blank', 'noopener,noreferrer');
+    }
+
     closeWindow(windowId) {
         const win = this.windows.get(windowId);
         if (!win) return;
