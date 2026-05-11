@@ -415,3 +415,7 @@ const rbacAdmin = (function () {
         loadDepartmentPicker, loadDepartmentContext, deleteAclAndReload
     };
 })();
+
+// CRÍTICO: exponer rbacAdmin como global. Los onclick="rbacAdmin.deleteAcl(...)"
+// generados por la UI de Permisos avanzados dependen de window.rbacAdmin.
+window.rbacAdmin = rbacAdmin;

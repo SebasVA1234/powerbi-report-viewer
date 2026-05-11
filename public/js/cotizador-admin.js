@@ -545,3 +545,7 @@ const cotizadorAdmin = (function () {
         loadAuditLog
     };
 })();
+
+// CRÍTICO: exponer cotizadorAdmin como global. Los onclick="cotizadorAdmin.openCreateTarifa()"
+// del HTML del módulo "Configurar tarifas" dependen de window.cotizadorAdmin.
+window.cotizadorAdmin = cotizadorAdmin;

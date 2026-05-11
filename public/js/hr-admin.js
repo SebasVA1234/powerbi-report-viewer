@@ -777,3 +777,9 @@ const hrAdmin = (function () {
             onMemoTargetTypeChange
     };
 })();
+
+// CRÍTICO: exponer hrAdmin como global. Los onclick="hrAdmin.editEmployee(1)"
+// generados por displayEmployees() / loadHolidays() / loadTimeOff() / loadMemos()
+// dependen de window.hrAdmin existiendo. Sin esto, los botones se ven pero al
+// clickearlos no pasa nada (ReferenceError silencioso porque IIFE encapsula).
+window.hrAdmin = hrAdmin;
