@@ -249,15 +249,19 @@ class HrController {
     // como department_id del empleado para que la lista por depto funcione.
     static async syncEmployeesFromUsers(req, res) {
         try {
+            // user_departments tiene PK compuesta (user_id, dept_id) — sin
+            // columna `id` autoincrement. Ordenamos por granted_at que sí existe.
             const users = await db.query(`
                 SELECT u.id, u.full_name,
                        (SELECT department_id FROM user_departments
-                        WHERE user_id = u.id ORDER BY id LIMIT 1) AS first_dept
+                        WHERE user_id = u.id
+                        ORDER BY granted_at ASC LIMIT 1) AS first_dept
                 FROM users u
                 LEFT JOIN hr_employees e ON e.user_id = u.id
                 WHERE e.id IS NULL AND u.is_active = 1
             `);
             let created = 0;
+            const errors = [];
             for (const u of users) {
                 try {
                     await db.execute(
@@ -267,13 +271,24 @@ class HrController {
                     );
                     created++;
                 } catch (e) {
-                    console.warn(`sync skip user ${u.id}:`, e.message);
+                    console.warn(`sync skip user ${u.id} (${u.full_name}):`, e.message);
+                    errors.push({ user_id: u.id, name: u.full_name, error: e.message });
                 }
             }
-            res.json({ success: true, data: { created, total_scanned: users.length } });
+            res.json({
+                success: true,
+                data: {
+                    created,
+                    total_scanned: users.length,
+                    errors: errors.length > 0 ? errors : undefined
+                }
+            });
         } catch (err) {
-            console.error('syncEmployeesFromUsers:', err);
-            res.status(500).json({ success: false, message: 'Error en backfill de empleados' });
+            console.error('syncEmployeesFromUsers FATAL:', err);
+            res.status(500).json({
+                success: false,
+                message: 'Error en backfill de empleados: ' + (err.message || 'desconocido')
+            });
         }
     }
 
