@@ -68,114 +68,10 @@
     --content-max:  1400px;
 }
 
-/* ============================================================
-   LIGHT MODE — sigue el prefers-color-scheme del sistema operativo
-   ============================================================
-   Override de tokens cuando el usuario tiene tema claro en su OS.
-   Mantenemos la identidad de marca (gradient-brand, primary, accent)
-   y solo invertimos backgrounds/textos/bordes para legibilidad.
-   ============================================================ */
-@media (prefers-color-scheme: light) {
-    :root {
-        --bg-page:        #f8fafc;        /* slate-50 */
-        --bg-app:         #ffffff;
-        --bg-card:        #ffffff;
-        --bg-elevated:    #f1f5f9;        /* slate-100 */
-        --bg-hover:       rgba(15, 23, 42, 0.04);
-        --bg-input:       #f8fafc;        /* slate-50 */
-
-        --text-1:         #0f172a;        /* slate-900 — primario en claro */
-        --text-2:         #334155;        /* slate-700 — secundario */
-        --text-3:         #64748b;        /* slate-500 — terciario / placeholders */
-
-        --border:         rgba(15, 23, 42, 0.10);
-        --border-strong:  rgba(15, 23, 42, 0.18);
-
-        --gradient-card:  linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0) 100%);
-        --gradient-page:  radial-gradient(ellipse at top, #e0e7ff 0%, #f8fafc 60%);
-
-        --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
-        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
-        --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.14);
-    }
-
-    /* Login card en light: sin glow violeta tan fuerte */
-    .login-card {
-        box-shadow: var(--shadow-lg) !important;
-    }
-    /* Scrollbar más sutil en light */
-    ::-webkit-scrollbar-thumb {
-        background: rgba(15, 23, 42, 0.12) !important;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: rgba(15, 23, 42, 0.24) !important;
-    }
-    /* Orbs decorativos: bajar opacidad para no saturar el fondo claro */
-    .orb { opacity: 0.18 !important; }
-
-    /* Glass cards y rgba blancas hardcodeadas: en light mode el bg blanco
-       hace que los rgba(255,255,255,0.04) se pierdan. Repintar con tints
-       oscuros sutiles para mantener la jerarquía visual. */
-    .pricing-row,
-    .cot-meta-item,
-    .cot-escenario,
-    .setting-item {
-        background: rgba(15, 23, 42, 0.03) !important;
-    }
-    .rate-input-wrapper {
-        background: rgba(15, 23, 42, 0.04) !important;
-    }
-    .cotizador-mode-toggle {
-        background: rgba(15, 23, 42, 0.04) !important;
-    }
-    .reports-counter,
-    #stat-reports,
-    #stat-documents,
-    .category-count,
-    .welcome-actions .btn,
-    .welcome-actions button,
-    .btn-refresh,
-    button.btn-outline {
-        background: rgba(15, 23, 42, 0.04) !important;
-    }
-    /* Notification toasts — en light el bg-card es blanco, agregar borde
-       para destacar del fondo de la página */
-    #notification-container .notification,
-    .notification {
-        box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18) !important;
-    }
-    /* Sidebar en light */
-    .sidebar {
-        background: rgba(255, 255, 255, 0.85) !important;
-        border-right: 1px solid var(--border) !important;
-    }
-    /* Top bar en light */
-    .topbar {
-        background: rgba(255, 255, 255, 0.85) !important;
-        border-bottom: 1px solid var(--border) !important;
-    }
-    /* Brand gradient text — funciona igual en light, solo aclarar el primary
-       para que no quede ilegible sobre fondos blancos */
-    .login-header h1,
-    .gradient-text {
-        background: linear-gradient(135deg, var(--primary-dark), #047857) !important;
-        -webkit-background-clip: text !important;
-        background-clip: text !important;
-    }
-    /* Hover en cards de reportes — usar tint oscuro */
-    .report-card:hover, .document-card:hover, .category-card:hover {
-        box-shadow: var(--shadow-lg), 0 0 30px rgba(99, 102, 241, 0.2) !important;
-    }
-    /* Modal overlay más oscuro en light para contraste */
-    .modal,
-    .confirm-dialog-overlay {
-        background-color: rgba(15, 23, 42, 0.5) !important;
-    }
-    /* Inputs en light */
-    input::placeholder, textarea::placeholder {
-        color: var(--text-3) !important;
-    }
-}
+/* (Light mode @media movido al final del archivo para que sus
+   overrides con !important ganen la cascada CSS — antes estaba
+   acá pero las reglas globales posteriores con !important lo pisaban
+   y la sidebar/topbar/etc seguían oscuras en light mode.) */
 
 /* ===== Reset/base sobre el html previo ===== */
 * {
@@ -1708,4 +1604,188 @@ input[type="file"]::file-selector-button:hover {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
     gap: 0.6rem;
+}
+
+/* ============================================================
+   LIGHT MODE — bloque maestro al final del archivo
+   ============================================================
+   Sigue prefers-color-scheme del SO. Ubicado al final para que sus
+   !important venzan a las reglas globales del tema oscuro que están
+   en posiciones anteriores del archivo (cascade CSS: a igual
+   specificity gana la más tardía). Mantiene la identidad de marca
+   (gradient-brand, primary, accent) y solo invierte fondos/textos
+   /bordes para legibilidad sobre un tema claro.
+   ============================================================ */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-page:        #f8fafc;        /* slate-50 */
+        --bg-app:         #ffffff;
+        --bg-card:        #ffffff;
+        --bg-elevated:    #f1f5f9;        /* slate-100 */
+        --bg-hover:       rgba(15, 23, 42, 0.04);
+        --bg-input:       #f8fafc;
+        --text-1:         #0f172a;        /* slate-900 */
+        --text-2:         #334155;        /* slate-700 */
+        --text-3:         #64748b;        /* slate-500 */
+        --border:         rgba(15, 23, 42, 0.10);
+        --border-strong:  rgba(15, 23, 42, 0.18);
+        --gradient-card:  linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0) 100%);
+        --gradient-page:  radial-gradient(ellipse at top, #e0e7ff 0%, #f8fafc 60%);
+        --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
+        --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.14);
+    }
+
+    /* Sidebar y topbar — antes seguían oscuras en light porque las reglas
+       globales con !important venían DESPUÉS del @media. Ahora ese problema
+       desaparece porque el @media está al final del archivo. */
+    .sidebar {
+        background: rgba(255, 255, 255, 0.85) !important;
+        border-right: 1px solid var(--border) !important;
+        box-shadow: 1px 0 30px rgba(15, 23, 42, 0.06) !important;
+    }
+    .topbar {
+        background: rgba(255, 255, 255, 0.85) !important;
+        border-bottom: 1px solid var(--border) !important;
+    }
+    .sidebar-header {
+        border-bottom: 1px solid var(--border) !important;
+    }
+    /* Sidebar logo: el filter brightness(1.1) que aclaraba el logo oscuro
+       no aplica en light — lo dejamos sin filter. */
+    .sidebar-logo { filter: none !important; }
+
+    /* Nav links del sidebar: el slate-700 del token text-2 sobre fondo
+       blanco se ve. El item activo en light: violeta tint + texto violeta. */
+    .nav-link {
+        color: var(--text-2) !important;
+    }
+    .nav-link:hover {
+        background: rgba(99, 102, 241, 0.08) !important;
+        color: var(--primary-dark) !important;
+    }
+    .nav-link.active {
+        background: rgba(99, 102, 241, 0.12) !important;
+        color: var(--primary-dark) !important;
+    }
+    .nav-link.active::before,
+    .nav-link.active::after {
+        background: var(--primary) !important;
+    }
+
+    /* Login card */
+    .login-card { box-shadow: var(--shadow-lg) !important; }
+
+    /* Scrollbar más sutil */
+    ::-webkit-scrollbar-thumb        { background: rgba(15, 23, 42, 0.12) !important; }
+    ::-webkit-scrollbar-thumb:hover  { background: rgba(15, 23, 42, 0.24) !important; }
+
+    /* Orbs decorativos: bajar opacidad para no saturar */
+    .orb { opacity: 0.18 !important; }
+
+    /* Glass cards y rgba blancas hardcodeadas — en light el rgba(255,...,0.04)
+       desaparece; convertir a tints oscuros sutiles. */
+    .pricing-row,
+    .cot-meta-item,
+    .cot-escenario,
+    .setting-item {
+        background: rgba(15, 23, 42, 0.03) !important;
+    }
+    .rate-input-wrapper,
+    .cotizador-mode-toggle {
+        background: rgba(15, 23, 42, 0.04) !important;
+    }
+    .reports-counter,
+    #stat-reports,
+    #stat-documents,
+    .category-count,
+    .welcome-actions .btn,
+    .welcome-actions button,
+    .btn-refresh,
+    button.btn-outline {
+        background: rgba(15, 23, 42, 0.04) !important;
+        color: var(--text-1) !important;
+        border-color: var(--border) !important;
+    }
+
+    /* Notification toasts */
+    #notification-container .notification,
+    .notification {
+        box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18) !important;
+    }
+
+    /* Brand gradient text — usar tonos más oscuros para legibilidad sobre blanco */
+    .login-header h1,
+    .gradient-text {
+        background: linear-gradient(135deg, var(--primary-dark), #047857) !important;
+        -webkit-background-clip: text !important;
+        background-clip: text !important;
+    }
+
+    /* Hover sobre cards de reportes */
+    .report-card:hover,
+    .document-card:hover,
+    .category-card:hover {
+        box-shadow: var(--shadow-lg), 0 0 30px rgba(99, 102, 241, 0.2) !important;
+    }
+
+    /* Modal overlays — usar tint oscuro para contraste con cards blancas */
+    .modal,
+    .confirm-dialog-overlay {
+        background-color: rgba(15, 23, 42, 0.5) !important;
+    }
+
+    /* User pill (top right) */
+    .user-menu {
+        background: rgba(15, 23, 42, 0.04) !important;
+        border: 1px solid var(--border) !important;
+    }
+    .user-menu:hover {
+        background: rgba(15, 23, 42, 0.07) !important;
+    }
+    .user-name { color: var(--text-1) !important; }
+    .user-role { color: var(--text-3) !important; }
+
+    /* Help buttons (Tour / Manual) en light */
+    .help-btn {
+        background: rgba(15, 23, 42, 0.04) !important;
+        color: var(--text-2) !important;
+        border-color: var(--border) !important;
+    }
+    .help-btn:hover {
+        background: rgba(99, 102, 241, 0.08) !important;
+        border-color: var(--primary) !important;
+        color: var(--text-1) !important;
+    }
+
+    /* Search box y inputs en topbar */
+    .search-box {
+        background: rgba(15, 23, 42, 0.04) !important;
+        border: 1px solid var(--border) !important;
+    }
+    .search-box input { color: var(--text-1) !important; }
+
+    /* Asegurar que TODOS los headings reciban text-1 en light, incluso si
+       el legacy CSS les pone color: #111827 (que es lo correcto en light). */
+    .reports-section-header h2,
+    .reports-section-header h3,
+    .section-title h2,
+    .welcome-header h1,
+    .category-header h3,
+    .tab-header h3 {
+        color: var(--text-1) !important;
+    }
+
+    /* Placeholder inputs */
+    input::placeholder, textarea::placeholder {
+        color: var(--text-3) !important;
+    }
+
+    /* Tour overlay — backdrop más claro y spotlight más visible */
+    #tour-overlay::before {
+        background: rgba(15, 23, 42, 0.45) !important;
+    }
+    .tour-spotlight {
+        box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.45) !important;
+    }
 }
