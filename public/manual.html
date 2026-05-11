@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual · Helper Ecualand</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/design-system.css">
+    <style>
+        body { background: var(--gradient-page) !important; min-height: 100vh; }
+        .manual-shell {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+            position: relative;
+            z-index: 2;
+        }
+        .manual-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        .manual-logo {
+            display: inline-block;
+            font-size: 2.5rem;
+            font-weight: 900;
+            letter-spacing: -0.03em;
+            background: var(--gradient-brand);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        .manual-subtitle {
+            font-size: 1.1rem;
+            color: var(--text-2);
+            max-width: 640px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+        .open-portal {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--gradient-brand);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius-pill);
+            text-decoration: none;
+            font-weight: 700;
+            margin-top: 1.5rem;
+            box-shadow: var(--shadow-md);
+            transition: transform var(--transition-fast);
+        }
+        .open-portal:hover { transform: translateY(-2px); color: white; }
+
+        /* Role tabs */
+        .role-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        .role-tab {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text-2);
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--radius-pill);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all var(--transition-fast);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .role-tab:hover {
+            border-color: var(--border-strong);
+            color: var(--text-1);
+        }
+        .role-tab.active {
+            background: var(--gradient-brand);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+        @media (prefers-color-scheme: light) {
+            .role-tab { background: rgba(15, 23, 42, 0.04); }
+        }
+
+        /* Cards grid */
+        .role-pane { display: none; animation: fade-in 250ms ease; }
+        .role-pane.active { display: block; }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        .action-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all var(--transition-normal);
+            position: relative;
+            overflow: hidden;
+        }
+        .action-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--gradient-brand);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform var(--transition-normal);
+        }
+        .action-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lg);
+        }
+        .action-card:hover::before { transform: scaleX(1); }
+        .action-card.expanded {
+            grid-column: 1 / -1;
+            border-color: var(--primary);
+            box-shadow: var(--shadow-lg), 0 0 30px rgba(99,102,241,0.2);
+        }
+        .action-card.expanded::before { transform: scaleX(1); }
+
+        .card-icon {
+            width: 48px; height: 48px;
+            border-radius: var(--radius-md);
+            background: rgba(99, 102, 241, 0.12);
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+        .card-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-1);
+            margin-bottom: 0.4rem;
+        }
+        .card-desc {
+            font-size: 0.85rem;
+            color: var(--text-3);
+            line-height: 1.5;
+        }
+        .card-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--primary-light);
+            margin-top: 0.85rem;
+        }
+        .card-cta::after {
+            content: '→';
+            transition: transform var(--transition-fast);
+        }
+        .action-card:hover .card-cta::after { transform: translateX(4px); }
+
+        .step-list {
+            display: none;
+            margin-top: 1.25rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--border);
+            animation: fade-in 300ms ease;
+        }
+        .action-card.expanded .step-list { display: block; }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 0.85rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .step:last-child { border-bottom: none; }
+        .step-num {
+            flex-shrink: 0;
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--gradient-brand);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 0.85rem;
+        }
+        .step-body { flex: 1; }
+        .step-title {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: var(--text-1);
+            margin-bottom: 0.2rem;
+        }
+        .step-detail {
+            font-size: 0.82rem;
+            color: var(--text-2);
+            line-height: 1.5;
+        }
+        .kbd {
+            display: inline-block;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-family: monospace;
+            font-size: 0.78em;
+            color: var(--primary-light);
+        }
+        .pill {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: var(--radius-pill);
+            font-size: 0.72em;
+            font-weight: 700;
+            margin-left: 0.4rem;
+            vertical-align: middle;
+        }
+        .pill.danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+        .pill.success { background: rgba(16, 185, 129, 0.15); color: var(--accent-light); }
+        .pill.warn { background: rgba(245, 158, 11, 0.15); color: var(--warn); }
+
+        .note {
+            background: rgba(99, 102, 241, 0.08);
+            border-left: 3px solid var(--primary);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-2);
+        }
+        .note strong { color: var(--text-1); }
+
+        /* Mini diagrama de UI */
+        .mini-ui {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            margin: 0.6rem 0;
+            font-family: monospace;
+            font-size: 0.78rem;
+            color: var(--text-2);
+            line-height: 1.7;
+        }
+        .mini-ui .hl {
+            background: rgba(99, 102, 241, 0.25);
+            border: 1px solid rgba(99, 102, 241, 0.5);
+            padding: 0 4px;
+            border-radius: 3px;
+            color: var(--primary-light);
+            font-weight: 700;
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .back-link {
+            position: fixed;
+            top: 1rem;
+            left: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-1);
+            padding: 0.55rem 1rem;
+            border-radius: var(--radius-pill);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            z-index: 10;
+            transition: transform var(--transition-fast);
+        }
+        .back-link:hover { transform: translateX(-3px); color: var(--text-1); }
+    </style>
+</head>
+<body>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+
+    <a href="/" class="back-link">← Volver al portal</a>
+
+    <div class="manual-shell">
+        <div class="manual-header">
+            <div class="manual-logo">📘 Manual rápido</div>
+            <h1 style="font-size: 2rem; font-weight: 800; margin-bottom: 0.5rem; color: var(--text-1);">
+                Cómo usar Helper Ecualand
+            </h1>
+            <p class="manual-subtitle">
+                Guía interactiva por rol. Hacé click en cualquier acción para ver los pasos.
+                Cuando termines, podés probar todo en vivo.
+            </p>
+            <a href="/" class="open-portal">🚀 Abrir el portal</a>
+        </div>
+
+        <div class="role-tabs">
+            <button class="role-tab active" data-role="empleado">👤 Empleado</button>
+            <button class="role-tab" data-role="jefe">👔 Jefe de área</button>
+            <button class="role-tab" data-role="rrhh">🧑‍💼 RRHH</button>
+            <button class="role-tab" data-role="admin">⚙️ Administrador</button>
+        </div>
+
+        <!-- EMPLEADO -->
+        <div class="role-pane active" data-role-pane="empleado">
+            <div class="cards-grid">
+
+                <div class="action-card" data-action="login">
+                    <div class="card-icon">🔐</div>
+                    <div class="card-title">Iniciar sesión la primera vez</div>
+                    <div class="card-desc">Tu password inicial te la pasa el admin. La primera vez te pide cambiarla.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Andá al portal</div>
+                                <div class="step-detail">URL: <span class="kbd">powerbi-report-viewer-production.up.railway.app</span></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Tipeá tu email completo y la pass que te dio el admin</div>
+                                <div class="step-detail">Ej: <span class="kbd">tunombre@ecualand.ec</span> · pass <span class="kbd">Lo123Que@Te</span></div>
+                                <div class="note">⚠️ El usuario es el <strong>email completo</strong>, no la primera parte.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Iniciar Sesión"</div>
+                                <div class="step-detail">Si es tu primer login te pide cambiar la contraseña en Mi Perfil.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="change-pass">
+                    <div class="card-icon">🔑</div>
+                    <div class="card-title">Cambiar tu contraseña</div>
+                    <div class="card-desc">Lo hacés desde Mi Perfil cuando quieras.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">Perfil</span></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Scroll hasta la card <strong>Cambiar contraseña</strong></div>
+                                <div class="step-detail">Llená Contraseña actual + Nueva (mínimo 8 chars) + Repetí la nueva</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Cambiar contraseña"</div>
+                                <div class="step-detail">La próxima vez que entres usá la nueva.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="ver-reportes">
+                    <div class="card-icon">📊</div>
+                    <div class="card-title">Ver tus reportes asignados</div>
+                    <div class="card-desc">Solo ves los reportes que el admin te asignó (directo, por depto o por rol).</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">Inicio</span></div>
+                                <div class="step-detail">Acá ves todos los reportes que tenés acceso, agrupados por categoría.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Ver" en cualquier reporte</div>
+                                <div class="step-detail">Se abre en una ventana del visor Power BI dentro del portal.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="ver-documentos">
+                    <div class="card-icon">📄</div>
+                    <div class="card-title">Ver tus documentos (PDFs)</div>
+                    <div class="card-desc">Solo lectura, con marca de agua y descarga bloqueada por seguridad.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">Documentos</span></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Click en cualquier card</div>
+                                <div class="step-detail">El PDF abre en un visor seguro: no se puede descargar ni imprimir.</div>
+                                <div class="note">Tu nombre + fecha aparecen como marca de agua. Quedó registrado quién vio qué y cuándo.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="pedir-tiempo">
+                    <div class="card-icon">🏖️</div>
+                    <div class="card-title">Pedir tiempo libre / vacaciones</div>
+                    <div class="card-desc">Vacaciones, feriado compensado, enfermedad, permiso personal.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">RRHH</span> → tab <strong>Solicitudes</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "+ Nueva Solicitud"</div>
+                                <div class="step-detail">Elegí tipo (vacaciones / feriado compensado / etc.), fechas desde-hasta, días totales y motivo.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Enviar</div>
+                                <div class="step-detail">Tu jefe o RRHH recibe la solicitud y la aprueba/rechaza. Vos ves el estado en la misma tabla.</div>
+                                <div class="note">Si pedís "feriado compensado" se descuenta del banco de días que se acumula cuando trabajás feriados.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="leer-memos">
+                    <div class="card-icon">📬</div>
+                    <div class="card-title">Leer un memo / comunicado</div>
+                    <div class="card-desc">Los memos son inmutables (no se pueden editar después de emitirlos) y registran quién los acusó.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">RRHH</span> → tab <strong>Memos</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Ver" en el memo</div>
+                                <div class="step-detail">Ves contenido + verificación de integridad (hash SHA-256).</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Acusar recibo"</div>
+                                <div class="step-detail">Queda registrado con timestamp + IP. El emisor ve quién acusó.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- JEFE -->
+        <div class="role-pane" data-role-pane="jefe">
+            <div class="cards-grid">
+
+                <div class="action-card" data-action="aprobar-time-off">
+                    <div class="card-icon">✅</div>
+                    <div class="card-title">Aprobar / rechazar solicitudes de tu equipo</div>
+                    <div class="card-desc">Solo ves las solicitudes de la gente de tu departamento.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">RRHH</span> → tab <strong>Solicitudes</strong></div>
+                                <div class="step-detail">Filtro por estado: Pendientes (default), Aprobadas, Rechazadas.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Click <span class="pill success">Aprobar</span> o <span class="pill danger">Rechazar</span></div>
+                                <div class="step-detail">Si rechazás te pide motivo (el empleado lo ve).</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="emitir-memo">
+                    <div class="card-icon">📢</div>
+                    <div class="card-title">Emitir un memo a tu equipo</div>
+                    <div class="card-desc">Una vez emitido NO se puede editar. Si necesitás corregirlo, emitís uno nuevo.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">RRHH</span> → tab <strong>Memos</strong> → <strong>+ Emitir Memo</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Llená el form</div>
+                                <div class="step-detail">Asunto · Destinatario (empleado individual, depto entero o toda la empresa) · Severidad (info / advertencia / sanción) · Contenido</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Emitir Memo"</div>
+                                <div class="step-detail">Se calcula su hash SHA-256. El destinatario lo recibe en su Inbox.</div>
+                                <div class="note">Si severidad = <span class="pill danger">sanción</span> queda como amonestación formal. Histórico inmutable.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="ver-equipo">
+                    <div class="card-icon">👥</div>
+                    <div class="card-title">Ver el equipo de tu departamento</div>
+                    <div class="card-desc">Solo si sos jefe (admin te asignó <span class="kbd">hr.read.team</span> o is_head=1 en el depto).</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">RRHH → tab <strong>Empleados</strong></div>
+                                <div class="step-detail">Filtrá por tu departamento. Click "Saldo" para ver banco de días compensados de cada uno.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- RRHH -->
+        <div class="role-pane" data-role-pane="rrhh">
+            <div class="cards-grid">
+
+                <div class="action-card" data-action="crear-empleado">
+                    <div class="card-icon">➕</div>
+                    <div class="card-title">Crear un empleado nuevo</div>
+                    <div class="card-desc">El empleado puede o no estar vinculado a un usuario del sistema.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">RRHH</span> → tab <strong>Empleados</strong> → <strong>+ Nuevo Empleado</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Llená nombre, cargo, departamento, fecha de ingreso, doc ID</div>
+                                <div class="step-detail">Click "Crear empleado". La fila aparece en la tabla.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="registrar-asistencia-feriado">
+                    <div class="card-icon">📅</div>
+                    <div class="card-title">Registrar quién trabajó un feriado</div>
+                    <div class="card-desc">Suma 1 día al banco de compensados del empleado.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">RRHH → tab <strong>Calendario Feriados</strong></div>
+                                <div class="step-detail">Click <strong>+ Asistencia</strong> en la fila del feriado.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Elegí empleado, horario (ej "7:00 a 5:00") y crédito (default 1 día)</div>
+                                <div class="step-detail">Click "Registrar asistencia". Queda contabilizado.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="crear-feriado">
+                    <div class="card-icon">🎉</div>
+                    <div class="card-title">Agregar un feriado nuevo</div>
+                    <div class="card-desc">Para decretos del gobierno que no estén en el calendario base 2026.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">RRHH → tab <strong>Calendario Feriados</strong> → <strong>+ Nuevo Feriado</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Fecha + Nombre + Descripción + Tipo</div>
+                                <div class="step-detail">Tipo: Nacional o Decretado / custom.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ADMINISTRADOR -->
+        <div class="role-pane" data-role-pane="admin">
+            <div class="cards-grid">
+
+                <div class="action-card" data-action="crear-usuario">
+                    <div class="card-icon">👤</div>
+                    <div class="card-title">Crear un usuario nuevo (con depto y rol)</div>
+                    <div class="card-desc">Todo en un solo modal — antes había que ir a 3 lugares.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">Administración</span> → tab <strong>Usuarios</strong> → <strong>+ Nuevo Usuario</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Datos básicos</div>
+                                <div class="step-detail">Usuario (idealmente el email completo) · Nombre · Email · Contraseña inicial · Rol legacy (user / admin)</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Marcar depto + rol del organigrama</div>
+                                <div class="step-detail">Checkboxes inline. Podés marcar varios deptos / roles.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">4</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Crear Usuario"</div>
+                                <div class="step-detail">Toast confirma: "Usuario creado · 1 depto · 1 rol asignados".</div>
+                                <div class="note">El usuario nuevo tiene <span class="kbd">must_change_password=1</span> — la primera vez que entra debe cambiarla.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="asignar-reporte">
+                    <div class="card-icon">🎯</div>
+                    <div class="card-title">Asignar un reporte a alguien</div>
+                    <div class="card-desc">Por usuario, departamento o rol — todo desde un modal.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Administración → tab <strong>Reportes</strong></div>
+                                <div class="step-detail">Click el ícono <span class="pill success">verde</span> de "Accesos" en la fila del reporte.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Sub-tabs en el modal</div>
+                                <div class="mini-ui">
+[<span class="hl">Usuarios</span>] [Departamentos] [Roles]
+☑ Sergio Vokhmin (@vokhmin)
+☐ Melanie Rivas (@rivas)
+                                </div>
+                                <div class="step-detail">Asignar a un usuario individual, o ir a Departamentos y marcar "Ventas" (todos los de Ventas ven el reporte).</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Click "Guardar Accesos"</div>
+                                <div class="step-detail">Toast: "Guardado: 1 user · +1/-0 depto · +0/-0 rol".</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="subir-documento">
+                    <div class="card-icon">📤</div>
+                    <div class="card-title">Subir un documento PDF</div>
+                    <div class="card-desc">Se guarda en el volumen de Railway, no en la DB. Tamaño máx 50 MB.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Administración → tab <strong>Documentos</strong> → <strong>Subir Documento</strong></div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Nombre + Descripción + Categoría + archivo PDF</div>
+                                <div class="step-detail">Solo PDFs (no .docx ni imágenes).</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Asignar accesos (mismo modal que reportes)</div>
+                                <div class="step-detail">Por usuario / depto / rol. El documento aparece en "Documentos" del usuario asignado.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="cargar-tarifa">
+                    <div class="card-icon">💸</div>
+                    <div class="card-title">Cargar tarifas del cotizador</div>
+                    <div class="card-desc">Tarifa de flete por (carguera + aerolínea + ruta + rango peso) y costos por país.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Sidebar → <span class="kbd">Cotizador</span> → botón <strong>⚙️ Configurar tarifas</strong></div>
+                                <div class="step-detail">Si no ves el botón, no tenés el permiso <span class="kbd">cotizador.tarifas.manage</span>.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Tab "Tarifas de flete" → <strong>+ Nueva tarifa</strong></div>
+                                <div class="step-detail">Elegí Carguera (Saftec, Ebf, etc.), Aerolínea (Avianca, KLM…), Origen (UIO), Destino (MIA), rango de peso, $/kg, cuarto frío, doc fijo.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Tab "Costos por país" → editar fila por país</div>
+                                <div class="step-detail">Aduana fija ($), Transporte interno ($/caja), % Arancel, % IVA. Click "Aplicar" en cada uno.</div>
+                                <div class="note">Si los valores no cambiaron, no se guarda nada (idempotente).</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">4</div>
+                            <div class="step-body">
+                                <div class="step-title">Tab "Auditoría"</div>
+                                <div class="step-detail">Ves el historial de cada cambio: qué tarifa, qué valor cambió, quién y cuándo.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="dar-permiso-tarifa">
+                    <div class="card-icon">🛡️</div>
+                    <div class="card-title">Dar permiso a alguien para tocar tarifas</div>
+                    <div class="card-desc">El permiso es <span class="kbd">cotizador.tarifas.manage</span>. Lo otorgás vía un usuario o un rol.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Administración → <strong>Permisos avanzados</strong> → "Por Usuario"</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Seleccioná el usuario</div>
+                                <div class="step-detail">Ves todos sus permisos efectivos.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Asignale un rol que tenga el permiso</div>
+                                <div class="step-detail">Los roles que YA tienen <span class="kbd">cotizador.tarifas.manage</span>: admin_sistema, gerencia, jefe_innovacion.</div>
+                                <div class="note">O creá una ACL directa a "cotizador" como recurso si querés que UN usuario específico lo tenga sin asignarle un rol entero.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-card" data-action="eliminar">
+                    <div class="card-icon">🗑️</div>
+                    <div class="card-title">Eliminar algo (con doble seguridad)</div>
+                    <div class="card-desc">Borrar usuarios, reportes, documentos, tarifas, empleados.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">Click el botón <span class="pill danger">papelera roja</span> en la fila</div>
+                                <div class="step-detail">El color rojo significa acción destructiva.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Modal con impacto</div>
+                                <div class="step-detail">Te dice qué se borra y cuántos otros records afecta (ej "Afecta a 1 usuario con acceso").</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Tipear "ELIMINAR" exacto</div>
+                                <div class="step-detail">El botón Confirmar queda bloqueado hasta que escribas la palabra. Doble red de seguridad.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.role-tab').forEach(t => {
+            t.addEventListener('click', () => {
+                const role = t.dataset.role;
+                document.querySelectorAll('.role-tab').forEach(x => x.classList.toggle('active', x === t));
+                document.querySelectorAll('.role-pane').forEach(p =>
+                    p.classList.toggle('active', p.dataset.rolePane === role)
+                );
+            });
+        });
+
+        // Card expand/collapse
+        document.querySelectorAll('.action-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Ignore clicks on links/buttons inside
+                if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+                // Close all others in same pane
+                const pane = card.closest('.role-pane');
+                pane.querySelectorAll('.action-card.expanded').forEach(c => {
+                    if (c !== card) c.classList.remove('expanded');
+                });
+                card.classList.toggle('expanded');
+                if (card.classList.contains('expanded')) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

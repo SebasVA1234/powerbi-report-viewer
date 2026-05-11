@@ -133,6 +133,21 @@
                             <input type="text" placeholder="Buscar reportes..." id="search-reports">
                         </div>
                         <div class="topbar-right">
+                            <button class="help-btn" onclick="startGuidedTour()" title="Tour guiado por el portal (ESC para cerrar)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                <span>Tour</span>
+                            </button>
+                            <a class="help-btn" href="manual.html" target="_blank" title="Manual completo · se abre en una pestaña aparte">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                </svg>
+                                <span>Manual</span>
+                            </a>
                             <div class="user-menu" onclick="toggleUserDropdown()">
                                 <div class="user-avatar" id="user-avatar">U</div>
                                 <div class="user-details">
@@ -1414,6 +1429,7 @@
     <script src="js/documents.js"></script>
     <script src="js/cotizador.js"></script>
     <script src="js/cotizador-admin.js"></script>
+    <script src="js/tour.js"></script>
     <script src="js/admin.js"></script>
     <script src="js/rbac-admin.js"></script>
     <script src="js/hr-admin.js"></script>
