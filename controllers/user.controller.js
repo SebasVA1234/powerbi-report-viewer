@@ -26,28 +26,38 @@ class UserController {
             // leer la pass de otros users. Para resetearla usa updateUser
             // con password (nueva) o sin password (genera una temporal y
             // la devuelve UNA sola vez).
+            // PR-3b: incluir departamentos agregados como string para mostrar
+            // en la nueva columna de Admin. GROUP_CONCAT funciona en sqlite y
+            // postgres usa STRING_AGG con casting; aquí usamos el subselect
+            // correlacionado que es compatible con ambos sin condicionar driver.
             let baseQuery = `
-                SELECT id, username, email, full_name, role, is_active,
-                       must_change_password, created_at, updated_at
-                FROM users
+                SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active,
+                       u.must_change_password, u.created_at, u.updated_at,
+                       COALESCE((
+                           SELECT GROUP_CONCAT(d.name, ', ')
+                           FROM user_departments ud
+                           JOIN departments d ON d.id = ud.department_id
+                           WHERE ud.user_id = u.id
+                       ), '') AS departments
+                FROM users u
             `;
             let where = '';
             const params = [];
             if (search) {
-                where = ' WHERE username LIKE ? OR email LIKE ? OR full_name LIKE ?';
+                where = ' WHERE u.username LIKE ? OR u.email LIKE ? OR u.full_name LIKE ?';
                 const p = `%${search}%`;
                 params.push(p, p, p);
             }
 
-            // Total para paginación
+            // Total para paginación — usa el mismo alias para coincidir con la query principal
             const totalRow = await db.queryOne(
-                `SELECT COUNT(*) as total FROM users${where}`,
+                `SELECT COUNT(*) as total FROM users u${where}`,
                 params
             );
             const total = Number(totalRow.total);
 
             // Página actual
-            const listSql = baseQuery + where + ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+            const listSql = baseQuery + where + ' ORDER BY u.created_at DESC LIMIT ? OFFSET ?';
             const users = await db.query(
                 listSql,
                 [...params, parseInt(limit), parseInt(offset)]

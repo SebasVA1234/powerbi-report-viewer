@@ -70,34 +70,41 @@ function setupAdminTabs() {
 async function loadUsers() {
     const tbody = document.getElementById('users-table-body');
     try {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading">Cargando usuarios...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">Cargando usuarios...</td></tr>';
         const response = await API.getUsers({ limit: 500 });
         if (response.success) {
             currentUsers = response.data.users;
             displayUsers(currentUsers);
+            if (typeof populateUserFilterDepartments === 'function') populateUserFilterDepartments();
         }
     } catch (error) {
         console.error('Error loading users:', error);
-        tbody.innerHTML = '<tr><td colspan="6" class="error">Error al cargar usuarios</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="error">Error al cargar usuarios</td></tr>';
     }
 }
 
-// Display Users - PR-2d: pill coloreada por rol legacy + botón Permisos
-// que abre el modal RBAC completo. La col "Rol" sigue mostrando el rol legacy
-// (admin/user) porque el endpoint GET /api/users no expande roles RBAC; el
-// rol jerárquico real se ve dentro del modal de permisos.
+// PR-3b: estado de filtros y ordenamiento client-side (los <=50 users caben
+// fácil en memoria, evitamos round-trip al server por cada filtro).
+let _userFilters = { search: '', role: '', dept: '', status: '' };
+let _userSort = { col: null, dir: 'asc' };
+
+// Display Users - PR-2d + PR-3b: pill coloreada, col Departamento, filtros y sort.
 function displayUsers(users) {
     const tbody = document.getElementById('users-table-body');
-    if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">No hay usuarios</td></tr>';
+    const filtered = applyUserFilters(users);
+    const sorted = applyUserSort(filtered);
+    if (sorted.length === 0) {
+        const total = users.length;
+        const msg = total === 0
+            ? 'No hay usuarios'
+            : `Sin resultados (${total} usuarios filtrados)`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty">${msg}</td></tr>`;
         return;
     }
-    tbody.innerHTML = users.map(user => {
+    tbody.innerHTML = sorted.map(user => {
         const isAdmin = user.role === 'admin';
-        // Pill de rol legacy con tooltip que invita a abrir Permisos para ver el rol RBAC real
         const rolePillClass = isAdmin ? 'role-admin_sistema' : 'role-empleado';
         const roleLabel = isAdmin ? 'Administrador' : 'Usuario';
-        // Bloqueo visual de delete si target es admin (defensa horizontal espejo del backend)
         const deleteBtn = isAdmin
             ? `<button class="btn-delete btn-locked" title="No podés eliminar a otro Administrador" disabled>
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -105,6 +112,9 @@ function displayUsers(users) {
             : `<button class="btn-delete" onclick="deleteUser(${user.id})" title="Eliminar usuario">
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                </button>`;
+        const deptsCell = user.departments
+            ? user.departments.split(',').map(d => `<span class="dept-pill">${escapeHtmlSafe(d.trim())}</span>`).join(' ')
+            : '<span style="color:var(--text-3); font-size:0.8rem;">—</span>';
 
         return `
         <tr>
@@ -120,6 +130,7 @@ function displayUsers(users) {
             <td>${user.full_name}</td>
             <td>${user.email}</td>
             <td><span class="role-pill ${rolePillClass}"><span class="role-dot"></span>${roleLabel}</span></td>
+            <td>${deptsCell}</td>
             <td><span class="badge ${user.is_active ? 'badge-success' : 'badge-danger'}">${user.is_active ? 'Activo' : 'Inactivo'}</span></td>
             <td>
                 <div class="table-actions">
@@ -135,7 +146,106 @@ function displayUsers(users) {
         </tr>
         `;
     }).join('');
+    updateSortIndicators();
 }
+
+function escapeHtmlSafe(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Aplicar filtros sobre currentUsers (client-side).
+function applyUserFilters(users) {
+    const f = _userFilters;
+    return users.filter(u => {
+        if (f.search) {
+            const q = f.search.toLowerCase();
+            const hay = (u.full_name + ' ' + u.username + ' ' + u.email).toLowerCase();
+            if (!hay.includes(q)) return false;
+        }
+        if (f.role && u.role !== f.role) return false;
+        if (f.dept) {
+            const userDepts = (u.departments || '').toLowerCase();
+            if (!userDepts.includes(f.dept.toLowerCase())) return false;
+        }
+        if (f.status === 'active'   && !u.is_active) return false;
+        if (f.status === 'inactive' && u.is_active)  return false;
+        return true;
+    });
+}
+
+function applyUserSort(users) {
+    if (!_userSort.col) return users;
+    const col = _userSort.col;
+    const dir = _userSort.dir === 'desc' ? -1 : 1;
+    return [...users].sort((a, b) => {
+        const av = (a[col] ?? '').toString().toLowerCase();
+        const bv = (b[col] ?? '').toString().toLowerCase();
+        if (av < bv) return -1 * dir;
+        if (av > bv) return  1 * dir;
+        return 0;
+    });
+}
+
+// Callbacks de la toolbar — invocados desde el HTML.
+window.filterUsers = function () {
+    _userFilters = {
+        search: document.getElementById('users-filter-search')?.value.trim() || '',
+        role:   document.getElementById('users-filter-role')?.value || '',
+        dept:   document.getElementById('users-filter-dept')?.value || '',
+        status: document.getElementById('users-filter-status')?.value || ''
+    };
+    if (typeof currentUsers !== 'undefined') displayUsers(currentUsers);
+};
+
+window.clearUserFilters = function () {
+    ['users-filter-search','users-filter-role','users-filter-dept','users-filter-status']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    filterUsers();
+};
+
+// Click en headers de la tabla cambia el sort.
+document.addEventListener('click', (e) => {
+    const th = e.target.closest('.sortable-col');
+    if (!th) return;
+    const col = th.dataset.sortCol;
+    if (!col) return;
+    if (_userSort.col === col) {
+        _userSort.dir = _userSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _userSort = { col, dir: 'asc' };
+    }
+    if (typeof currentUsers !== 'undefined') displayUsers(currentUsers);
+});
+
+function updateSortIndicators() {
+    document.querySelectorAll('.sortable-col .sort-ind').forEach(s => s.textContent = '');
+    if (_userSort.col) {
+        const active = document.querySelector(`.sortable-col[data-sort-col="${_userSort.col}"] .sort-ind`);
+        if (active) active.textContent = _userSort.dir === 'asc' ? ' ↑' : ' ↓';
+    }
+}
+
+// Poblar dropdown de departamentos al cargar la sección Admin.
+async function populateUserFilterDepartments() {
+    const sel = document.getElementById('users-filter-dept');
+    if (!sel || sel.dataset.populated) return;
+    try {
+        const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+        const r = await fetch('/api/rbac/departments', { headers }).then(r => r.json());
+        const depts = (r.data && r.data.departments) || [];
+        depts.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.name;
+            opt.textContent = d.name;
+            sel.appendChild(opt);
+        });
+        sel.dataset.populated = '1';
+    } catch (err) {
+        console.warn('No se pudo poblar filtro de departamentos:', err);
+    }
+}
+window.populateUserFilterDepartments = populateUserFilterDepartments;
 
 // Load All Reports
 async function loadAllReports() {

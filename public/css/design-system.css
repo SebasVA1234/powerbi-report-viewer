@@ -1771,6 +1771,65 @@ input[type="file"]::file-selector-button:hover {
 .rubro-inline-form select { width: 120px; }
 
 /* ============================================================
+   PR-3b · Toolbar de filtros y headers ordenables en Admin > Usuarios
+   ============================================================ */
+.users-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.85rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.85rem;
+}
+.users-toolbar-search {
+    flex: 1 1 240px;
+    min-width: 200px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.users-toolbar-search svg {
+    position: absolute;
+    left: 12px;
+    color: var(--text-3);
+    pointer-events: none;
+}
+.users-toolbar-search input {
+    width: 100%;
+    padding: 0.55rem 0.85rem 0.55rem 36px !important;
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-1) !important;
+    font-size: 0.88rem;
+}
+.users-toolbar select {
+    padding: 0.55rem 0.85rem !important;
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-1) !important;
+    font-size: 0.86rem;
+    min-width: 160px;
+    cursor: pointer;
+}
+.data-table.sortable .sortable-col {
+    cursor: pointer;
+    user-select: none;
+    transition: color var(--transition-fast);
+}
+.data-table.sortable .sortable-col:hover { color: var(--primary-light) !important; }
+.data-table.sortable .sort-ind {
+    font-size: 0.7rem;
+    color: var(--primary-light);
+    margin-left: 0.15rem;
+}
+.dept-pill + .dept-pill { margin-left: 0.25rem; }
+
+/* ============================================================
    PR-2d · MÓDULO ADMINISTRACIÓN DE USUARIOS
    ============================================================
    Componentes para la nueva UI del panel de permisos por usuario:
@@ -2383,6 +2442,18 @@ input[type="file"]::file-selector-button:hover {
         color: #b45309 !important;
         border-color: rgba(245, 158, 11, 0.35) !important;
     }
+    .users-toolbar {
+        background: #ffffff !important;
+        border-color: var(--border) !important;
+    }
+    .users-toolbar-search input,
+    .users-toolbar select {
+        background: rgba(15, 23, 42, 0.04) !important;
+        border-color: var(--border) !important;
+        color: var(--text-1) !important;
+    }
+    .data-table.sortable .sortable-col:hover { color: var(--primary-dark) !important; }
+    .data-table.sortable .sort-ind { color: var(--primary-dark); }
     .pricing-rubro-chip strong { color: #0f172a !important; }
     .btn-add-rubro {
         background: rgba(99, 102, 241, 0.10) !important;

@@ -726,15 +726,40 @@
                                         Nuevo Usuario
                                     </button>
                                 </div>
+                                <!-- PR-3b: toolbar de filtros (search + dropdowns rol/depto/estado) -->
+                                <div class="users-toolbar">
+                                    <div class="users-toolbar-search">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <path d="m21 21-4.35-4.35"></path>
+                                        </svg>
+                                        <input type="text" id="users-filter-search" placeholder="Buscar por nombre, usuario o email..." oninput="filterUsers()">
+                                    </div>
+                                    <select id="users-filter-role" onchange="filterUsers()">
+                                        <option value="">Todos los roles</option>
+                                        <option value="admin">Administrador</option>
+                                        <option value="user">Usuario</option>
+                                    </select>
+                                    <select id="users-filter-dept" onchange="filterUsers()">
+                                        <option value="">Todos los departamentos</option>
+                                    </select>
+                                    <select id="users-filter-status" onchange="filterUsers()">
+                                        <option value="">Todos los estados</option>
+                                        <option value="active">Activo</option>
+                                        <option value="inactive">Suspendido</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="clearUserFilters()" title="Limpiar filtros">Limpiar</button>
+                                </div>
                                 <div class="table-container">
-                                    <table class="data-table">
+                                    <table class="data-table sortable">
                                         <thead>
                                             <tr>
-                                                <th>Usuario</th>
-                                                <th>Nombre</th>
-                                                <th>Email</th>
-                                                <th>Rol</th>
-                                                <th>Estado</th>
+                                                <th class="sortable-col" data-sort-col="full_name">Usuario <span class="sort-ind"></span></th>
+                                                <th class="sortable-col" data-sort-col="full_name">Nombre <span class="sort-ind"></span></th>
+                                                <th class="sortable-col" data-sort-col="email">Email <span class="sort-ind"></span></th>
+                                                <th class="sortable-col" data-sort-col="role">Rol <span class="sort-ind"></span></th>
+                                                <th class="sortable-col" data-sort-col="departments">Departamento <span class="sort-ind"></span></th>
+                                                <th class="sortable-col" data-sort-col="is_active">Estado <span class="sort-ind"></span></th>
                                                 <th>Acciones</th>
                                             </tr>
                                         </thead>
