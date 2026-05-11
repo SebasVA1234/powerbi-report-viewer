@@ -1612,6 +1612,11 @@ input[type="file"]::file-selector-button:hover {
     font-weight: 700;
     font-size: 0.78rem;
 }
+/* Inputs dentro de .rate-input-wrapper. Specificity boosted con el wrapper
+   parent para vencer al global input[type="number"] que aplica padding 14px
+   y dejaba el número cortado dentro de 70px width. */
+.rate-input-wrapper .rate-input,
+.rate-input-wrapper .pais-input,
 .rate-input,
 .pais-input {
     width: 70px;
@@ -1620,9 +1625,15 @@ input[type="file"]::file-selector-button:hover {
     color: var(--text-1) !important;
     font-size: 0.88rem;
     font-weight: 700;
-    outline: none;
+    outline: none !important;
     padding: 0 !important;
     text-align: right;
+    box-shadow: none !important;
+}
+.rate-input-wrapper .rate-input:focus,
+.rate-input-wrapper .pais-input:focus {
+    box-shadow: none !important;
+    border: none !important;
 }
 
 .btn-save-rate {
