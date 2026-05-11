@@ -230,7 +230,13 @@ const cotizadorAdmin = (function () {
     }
 
     // ------------------------------------------------------------
-    // COSTOS POR PAÍS (inline editable rows)
+    // COSTOS POR PAÍS (inline editable rows + rubros dinámicos)
+    // PR-2e: ahora cada país puede tener rubros custom (ej PRECOOLING)
+    // además de los 4 fijos. Persisten en tarifas_pais.rubros_dinamicos
+    // como JSON [{nombre, monto, tipo}]. El tipo puede ser:
+    //   - 'fijo'   → suma X una vez al total del país (USD)
+    //   - 'caja'   → multiplica X por cantidad de cajas
+    //   - 'porc'   → aplica X% sobre el subtotal
     // ------------------------------------------------------------
     function renderPaises() {
         const cont = document.getElementById('cot-paises-list');
@@ -238,7 +244,9 @@ const cotizadorAdmin = (function () {
             cont.innerHTML = '<div class="empty">Sin países configurados.</div>';
             return;
         }
-        cont.innerHTML = _paises.map(p => `
+        cont.innerHTML = _paises.map(p => {
+            const rubros = parseRubros(p.rubros_dinamicos);
+            return `
             <div class="pricing-row" data-pais-code="${escapeHtml(p.country_code)}">
                 <div class="pricing-flight-info">
                     <div class="airline-badge">${escapeHtml(p.country_code)}</div>
@@ -268,14 +276,123 @@ const cotizadorAdmin = (function () {
                     </div>
                     <button class="btn-save-rate" onclick="cotizadorAdmin.savePais('${escapeHtml(p.country_code)}', '${escapeHtml(p.country_name)}')">Aplicar</button>
                 </div>
+                <div class="pricing-rubros-section" data-rubros-for="${escapeHtml(p.country_code)}">
+                    <div class="pricing-rubros-list">
+                        ${renderRubroChips(p.country_code, rubros)}
+                        <button type="button" class="btn-add-rubro" onclick="cotizadorAdmin.toggleRubroForm('${escapeHtml(p.country_code)}')">
+                            + Agregar costo personalizado
+                        </button>
+                    </div>
+                    <div class="rubro-inline-form" id="rubro-form-${escapeHtml(p.country_code)}" style="display:none;">
+                        <input type="text" placeholder="Nombre (ej. Precooling)" maxlength="40" data-rubro-field="nombre">
+                        <input type="number" placeholder="Monto" step="0.01" min="0" data-rubro-field="monto">
+                        <select data-rubro-field="tipo">
+                            <option value="fijo">USD fijo</option>
+                            <option value="caja">USD / caja</option>
+                            <option value="porc">% sobre subtotal</option>
+                        </select>
+                        <button type="button" class="btn-save-rate" onclick="cotizadorAdmin.confirmAddRubro('${escapeHtml(p.country_code)}', '${escapeHtml(p.country_name)}')">Añadir</button>
+                        <button type="button" class="btn-outline" onclick="cotizadorAdmin.toggleRubroForm('${escapeHtml(p.country_code)}')">Cancelar</button>
+                    </div>
+                </div>
             </div>
+            `;
+        }).join('');
+    }
+
+    function parseRubros(raw) {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try {
+            const v = JSON.parse(raw);
+            return Array.isArray(v) ? v : [];
+        } catch { return []; }
+    }
+
+    function renderRubroChips(code, rubros) {
+        if (rubros.length === 0) return '';
+        const tipoLabel = { fijo: 'USD', caja: '/caja', porc: '%' };
+        return rubros.map((r, i) => `
+            <span class="pricing-rubro-chip" title="${escapeHtml(r.nombre || '')}">
+                <strong>${escapeHtml(r.nombre || '')}</strong>
+                <span>${Number(r.monto || 0)}</span>
+                <span class="rubro-tipo">${tipoLabel[r.tipo] || r.tipo}</span>
+                <button type="button" class="rubro-remove"
+                        onclick="cotizadorAdmin.removeRubro('${escapeHtml(code)}', ${i})"
+                        title="Quitar este costo">×</button>
+            </span>
         `).join('');
+    }
+
+    function toggleRubroForm(code) {
+        const form = document.getElementById('rubro-form-' + code);
+        if (!form) return;
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+        if (form.style.display === 'flex') {
+            form.querySelector('[data-rubro-field="nombre"]').focus();
+        }
+    }
+
+    async function confirmAddRubro(code, name) {
+        const form = document.getElementById('rubro-form-' + code);
+        if (!form) return;
+        const nombre = form.querySelector('[data-rubro-field="nombre"]').value.trim();
+        const monto  = parseFloat(form.querySelector('[data-rubro-field="monto"]').value) || 0;
+        const tipo   = form.querySelector('[data-rubro-field="tipo"]').value;
+        if (!nombre) {
+            Notification.error('Necesitás un nombre para el rubro');
+            return;
+        }
+        if (monto <= 0) {
+            Notification.error('Monto debe ser mayor a 0');
+            return;
+        }
+        const pais = _paises.find(p => p.country_code === code);
+        if (!pais) return;
+        const rubros = parseRubros(pais.rubros_dinamicos);
+        rubros.push({ nombre, monto, tipo });
+        await persistRubros(code, name, pais, rubros);
+    }
+
+    async function removeRubro(code, idx) {
+        const pais = _paises.find(p => p.country_code === code);
+        if (!pais) return;
+        const rubros = parseRubros(pais.rubros_dinamicos);
+        if (idx < 0 || idx >= rubros.length) return;
+        if (!confirm(`¿Quitar el costo "${rubros[idx].nombre}" de ${pais.country_name}?`)) return;
+        rubros.splice(idx, 1);
+        await persistRubros(code, pais.country_name, pais, rubros);
+    }
+
+    async function persistRubros(code, name, pais, rubros) {
+        const payload = {
+            country_code: code,
+            country_name: name,
+            aduana_fija: Number(pais.aduana_fija) || 0,
+            transporte_interno_caja: Number(pais.transporte_interno_caja) || 0,
+            porcentaje_arancel: Number(pais.porcentaje_arancel) || 0,
+            porcentaje_impuesto_consumo: Number(pais.porcentaje_impuesto_consumo) || 0,
+            rubros_dinamicos: rubros
+        };
+        try {
+            const r = await API.cotizadorUpsertTarifaPais(payload);
+            if (r && r.success) {
+                Notification.success('Costos actualizados');
+                await loadAll();
+            } else {
+                Notification.error(r.message || 'Error al guardar');
+            }
+        } catch (err) {
+            Notification.error(err.message || 'Error al guardar costos');
+        }
     }
 
     async function savePais(code, name) {
         const row = document.querySelector(`.pricing-row[data-pais-code="${code}"]`);
         if (!row) return;
-        const payload = { country_code: code, country_name: name };
+        const pais = _paises.find(p => p.country_code === code);
+        const rubros = pais ? parseRubros(pais.rubros_dinamicos) : [];
+        const payload = { country_code: code, country_name: name, rubros_dinamicos: rubros };
         row.querySelectorAll('.pais-input').forEach(i => {
             payload[i.dataset.field] = parseFloat(i.value) || 0;
         });
@@ -541,6 +658,8 @@ const cotizadorAdmin = (function () {
         init,
         openCreateTarifa, saveTarifa, deleteTarifa,
         savePais,
+        // PR-2e: rubros dinámicos por país
+        toggleRubroForm, confirmAddRubro, removeRubro,
         openCreateCatalog, openEditCatalog, deleteCatalog,
         loadAuditLog
     };

@@ -583,12 +583,21 @@ async function computarCotizacion(input) {
     const porcentajeArancel = parseFloat(tarifaPais.porcentaje_arancel) || 0;
     const porcentajeImpuesto = parseFloat(tarifaPais.porcentaje_impuesto_consumo) || 0;
 
-    const totalFijos = costoDocumentacion + aduanaFija;
+    // PR-2e: rubros dinámicos. Los rubros 'fijo' suman una vez, 'caja' x numeroCajas,
+    // 'porc' suman al porcentaje aplicado al subtotal.
+    let rubros = tarifaPais.rubros_dinamicos || [];
+    if (typeof rubros === 'string') { try { rubros = JSON.parse(rubros); } catch { rubros = []; } }
+    if (!Array.isArray(rubros)) rubros = [];
+    const rubrosFijos = rubros.filter(r => r.tipo === 'fijo').reduce((s, r) => s + (Number(r.monto) || 0), 0);
+    const rubrosCaja  = rubros.filter(r => r.tipo === 'caja').reduce((s, r) => s + (Number(r.monto) || 0), 0);
+    const rubrosPorc  = rubros.filter(r => r.tipo === 'porc').reduce((s, r) => s + (Number(r.monto) || 0), 0) / 100;
+
+    const totalFijos = costoDocumentacion + aduanaFija + rubrosFijos;
     const incidenciaFijosPorTallo = totalFijos / tallos;
     const costoCuartoFrioTotal = pesoFinalKg * costoCuartoFrioKilo;
     const costoFleteTotal = pesoFinalKg * tarifaFlete;
     const costoFletePorTallo = costoFleteTotal / tallos;
-    const costoTransporteTotal = numeroCajas * transporteInternoCaja;
+    const costoTransporteTotal = numeroCajas * (transporteInternoCaja + rubrosCaja);
     const costoTransportePorTallo = costoTransporteTotal / tallos;
 
     const calcularEscenario = (precioFob) => {
@@ -596,7 +605,7 @@ async function computarCotizacion(input) {
         const fobTotal = tallos * precio;
         const subtotal = fobTotal + costoFleteTotal + totalFijos
                        + costoTransporteTotal + costoCuartoFrioTotal;
-        const impuestos = subtotal * (porcentajeArancel + porcentajeImpuesto);
+        const impuestos = subtotal * (porcentajeArancel + porcentajeImpuesto + rubrosPorc);
         const granTotal = subtotal + impuestos;
         const landedCostPorTallo = granTotal / tallos;
         return {
@@ -612,6 +621,7 @@ async function computarCotizacion(input) {
                 costos_fijos: round(totalFijos),
                 transporte_interno: round(costoTransporteTotal),
                 cuarto_frio: round(costoCuartoFrioTotal),
+                rubros_dinamicos: rubros.length > 0 ? rubros : undefined,
                 impuestos: round(impuestos),
                 gran_total: round(granTotal)
             }

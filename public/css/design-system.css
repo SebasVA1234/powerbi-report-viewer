@@ -54,8 +54,10 @@
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
-    --shadow-glow-primary: 0 0 30px rgba(99, 102, 241, 0.3);
-    --shadow-glow-accent:  0 0 30px rgba(16, 185, 129, 0.3);
+    /* Glows reducidos: a 0.3 producían "rayos" violetas demasiado visibles
+       en dark mode sobre topbar, avatares y rows. 0.12 es sutil pero presente. */
+    --shadow-glow-primary: 0 0 24px rgba(99, 102, 241, 0.12);
+    --shadow-glow-accent:  0 0 24px rgba(16, 185, 129, 0.12);
 
     /* Animaciones */
     --transition-fast:   120ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -370,7 +372,6 @@ button.btn-primary {
     background: var(--gradient-brand) !important;
     color: white !important;
     font-weight: 700;
-    box-shadow: var(--shadow-glow-primary);
 }
 .user-name {
     color: var(--text-1) !important;
@@ -435,7 +436,7 @@ button.btn-primary {
 .report-card:hover, .document-card:hover, .category-card:hover {
     transform: translateY(-2px);
     border-color: var(--primary);
-    box-shadow: var(--shadow-lg), var(--shadow-glow-primary);
+    box-shadow: var(--shadow-lg);
 }
 
 /* ============================================================
@@ -1498,10 +1499,11 @@ input[type="file"]::file-selector-button:hover {
 
 /* Pricing row (estilo antigravity): cada tarifa o país es una fila glass */
 .pricing-row {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: var(--radius-md);
     padding: 1rem 1.25rem;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1556,13 +1558,14 @@ input[type="file"]::file-selector-button:hover {
     align-items: center;
     gap: 5px;
     padding: 0.4rem 0.65rem;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: var(--radius-sm);
     font-size: 0.82rem;
     color: var(--text-1);
-    transition: border-color var(--transition-fast);
+    transition: border-color var(--transition-fast), background var(--transition-fast);
 }
+.rate-input-wrapper:hover { background: rgba(255, 255, 255, 0.10); }
 .rate-input-wrapper:focus-within { border-color: var(--primary); }
 .rate-input-wrapper > span {
     color: var(--accent);
@@ -1605,6 +1608,107 @@ input[type="file"]::file-selector-button:hover {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
     gap: 0.6rem;
 }
+
+/* ============================================================
+   PR-2e · Cotizador — rubros dinámicos por país
+   ============================================================
+   El admin puede agregar costos personalizados a cada país además
+   de los 4 fijos (aduana, transporte, arancel, IVA). Ej: PRECOOLING,
+   FUMIGACIÓN, MANEJO ESPECIAL. Persisten en `tarifas_pais.rubros_dinamicos`
+   como JSON [{nombre, monto, tipo}].
+   ============================================================ */
+.pricing-row {
+    flex-wrap: wrap;
+}
+.pricing-row .pricing-rubros-section {
+    flex-basis: 100%;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.pricing-rubros-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.pricing-rubro-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.32rem 0.5rem 0.32rem 0.7rem;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.30);
+    border-radius: var(--radius-pill);
+    font-size: 0.78rem;
+    color: var(--accent-light);
+}
+.pricing-rubro-chip strong {
+    color: var(--text-1);
+    font-weight: 700;
+}
+.pricing-rubro-chip .rubro-tipo {
+    color: var(--text-3);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.pricing-rubro-chip .rubro-remove {
+    background: rgba(239, 68, 68, 0.20);
+    color: #fca5a5;
+    border: none;
+    border-radius: 50%;
+    width: 18px; height: 18px;
+    line-height: 1;
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+.pricing-rubro-chip .rubro-remove:hover { background: rgba(239, 68, 68, 0.35); }
+.btn-add-rubro {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    background: rgba(99, 102, 241, 0.14);
+    border: 1px dashed rgba(99, 102, 241, 0.40);
+    color: var(--primary-light);
+    border-radius: var(--radius-pill);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.btn-add-rubro:hover {
+    background: rgba(99, 102, 241, 0.24);
+    border-style: solid;
+}
+.rubro-inline-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.6rem;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: var(--radius-md);
+    margin-top: 0.4rem;
+}
+.rubro-inline-form input,
+.rubro-inline-form select {
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-1);
+    font-size: 0.85rem;
+}
+.rubro-inline-form input[type="text"] { flex: 1 1 160px; }
+.rubro-inline-form input[type="number"] { width: 90px; }
+.rubro-inline-form select { width: 120px; }
 
 /* ============================================================
    PR-2d · MÓDULO ADMINISTRACIÓN DE USUARIOS
@@ -2192,5 +2296,39 @@ input[type="file"]::file-selector-button:hover {
     }
     .user-perm-tab.active {
         color: var(--primary-dark) !important;
+    }
+
+    /* PR-2e light: tarjetas cotizador y rubros dinámicos */
+    .pricing-row {
+        background: #ffffff !important;
+        border: 1px solid var(--border) !important;
+    }
+    .pricing-row .pricing-rubros-section {
+        border-top-color: rgba(15, 23, 42, 0.08) !important;
+    }
+    .rate-input-wrapper {
+        background: rgba(15, 23, 42, 0.04) !important;
+        border: 1px solid var(--border) !important;
+    }
+    .rate-input-wrapper:hover {
+        background: rgba(15, 23, 42, 0.07) !important;
+    }
+    .pricing-rubro-chip {
+        background: rgba(16, 185, 129, 0.10) !important;
+        color: #047857 !important;
+        border-color: rgba(16, 185, 129, 0.30) !important;
+    }
+    .pricing-rubro-chip strong { color: #0f172a !important; }
+    .btn-add-rubro {
+        background: rgba(99, 102, 241, 0.10) !important;
+        color: var(--primary-dark) !important;
+        border-color: rgba(99, 102, 241, 0.35) !important;
+    }
+    .btn-add-rubro:hover {
+        background: rgba(99, 102, 241, 0.18) !important;
+    }
+    .rubro-inline-form {
+        background: rgba(99, 102, 241, 0.05) !important;
+        border-color: rgba(99, 102, 241, 0.22) !important;
     }
 }
