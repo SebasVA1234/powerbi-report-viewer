@@ -298,7 +298,9 @@ button.btn-primary {
     border-right: 1px solid var(--border) !important;
     box-shadow: 1px 0 30px rgba(0, 0, 0, 0.2);
     z-index: 10;
-    position: relative;
+    /* position:fixed se hereda de styles.css. NO ponerlo relative aquí — el
+       .main-wrapper ya tiene margin-left: var(--sidebar-width), si el sidebar
+       fuera relative ocuparía 240px en el flow y se SUMARÍA al margin → gap. */
 }
 .sidebar-header {
     border-bottom: 1px solid var(--border) !important;
