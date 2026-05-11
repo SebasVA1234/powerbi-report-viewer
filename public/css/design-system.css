@@ -305,6 +305,31 @@ button.btn-primary {
        .main-wrapper ya tiene margin-left: var(--sidebar-width), si el sidebar
        fuera relative ocuparía 240px en el flow y se SUMARÍA al margin → gap. */
 }
+
+/* Logo del sidebar como botón toggle (reemplaza hamburguesa del topbar) */
+.sidebar-header {
+    cursor: pointer;
+    transition: opacity 180ms, background 180ms;
+    position: relative;
+}
+.sidebar-header:hover {
+    background: rgba(99, 102, 241, 0.08);
+}
+.sidebar-header:hover::after {
+    content: "⇆";
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 13px;
+    color: var(--text-3);
+    pointer-events: none;
+}
+/* En desktop el sidebar ya está fijo a la izquierda — la hamburguesa del
+   topbar es redundante. Sólo aparece en mobile donde el sidebar es overlay. */
+@media (min-width: 1025px) {
+    .menu-toggle { display: none !important; }
+}
 .sidebar-header {
     border-bottom: 1px solid var(--border) !important;
     padding: 1.25rem 1rem !important;
