@@ -147,7 +147,29 @@ class WindowManager {
     openInNewTab(windowId) {
         const win = this.windows.get(windowId);
         if (!win) return;
-        window.open(win.embedUrl, '_blank', 'noopener,noreferrer');
+        const url = win.embedUrl;
+        // Validar que la URL sea utilizable — si viene null/empty/'undefined'
+        // el browser abriría about:blank y el usuario perdería contexto.
+        if (!url || url === 'undefined' || url === 'null' || !/^https?:\/\//i.test(url)) {
+            if (typeof Notification !== 'undefined' && Notification.error) {
+                Notification.error('Este reporte no tiene URL de Power BI configurada. Pedile al admin que la agregue en Administración › Reportes.');
+            } else {
+                alert('Este reporte no tiene URL configurada.');
+            }
+            return;
+        }
+        // Edge bloquea window.open en algunos contextos. Si retorna null,
+        // hacemos fallback con un <a target="_blank"> que casi siempre pasa.
+        const popup = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }
     }
 
     closeWindow(windowId) {
