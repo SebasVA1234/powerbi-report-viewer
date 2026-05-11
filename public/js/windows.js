@@ -94,9 +94,6 @@ class WindowManager {
                     <span class="window-title-text">${this.escapeHtml(title)}</span>
                 </div>
                 <div class="window-controls">
-                    <button class="window-btn window-btn-popout" onclick="windowManager.openInNewTab(${windowId})" title="Abrir en nueva pestaña (recomendado si el login de Microsoft no funciona dentro del marco)">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </button>
                     <button class="window-btn window-btn-minimize" onclick="windowManager.toggleMinimize(${windowId})" title="Minimizar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
@@ -141,37 +138,6 @@ class WindowManager {
         return windowId;
     }
     
-    // Abre el reporte en una pestaña nueva del browser. Fallback útil cuando
-    // el OAuth de Microsoft falla dentro del iframe (cookies de terceros
-    // bloqueadas por Chrome). En la pestaña nueva el usuario sí puede loguearse.
-    openInNewTab(windowId) {
-        const win = this.windows.get(windowId);
-        if (!win) return;
-        const url = win.embedUrl;
-        // Validar que la URL sea utilizable — si viene null/empty/'undefined'
-        // el browser abriría about:blank y el usuario perdería contexto.
-        if (!url || url === 'undefined' || url === 'null' || !/^https?:\/\//i.test(url)) {
-            if (typeof Notification !== 'undefined' && Notification.error) {
-                Notification.error('Este reporte no tiene URL de Power BI configurada. Pedile al admin que la agregue en Administración › Reportes.');
-            } else {
-                alert('Este reporte no tiene URL configurada.');
-            }
-            return;
-        }
-        // Edge bloquea window.open en algunos contextos. Si retorna null,
-        // hacemos fallback con un <a target="_blank"> que casi siempre pasa.
-        const popup = window.open(url, '_blank', 'noopener,noreferrer');
-        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-            const a = document.createElement('a');
-            a.href = url;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-        }
-    }
-
     closeWindow(windowId) {
         const win = this.windows.get(windowId);
         if (!win) return;
