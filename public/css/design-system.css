@@ -550,6 +550,15 @@ tr.archived td {
     color: var(--primary-light) !important;
     border-color: rgba(99, 102, 241, 0.3);
 }
+.badge-incomplete {
+    /* PR-3a: aviso ámbar para empleados con perfil mínimo sin completar. */
+    background: rgba(245, 158, 11, 0.18) !important;
+    color: #fcd34d !important;
+    border-color: rgba(245, 158, 11, 0.35);
+    margin-left: 0.4rem;
+    font-size: 0.62rem !important;
+    padding: 0.12rem 0.5rem !important;
+}
 .badge-user {
     background: rgba(168, 85, 247, 0.15) !important;
     color: #c4b5fd !important;
@@ -2368,6 +2377,11 @@ input[type="file"]::file-selector-button:hover {
         background: rgba(16, 185, 129, 0.10) !important;
         color: #047857 !important;
         border-color: rgba(16, 185, 129, 0.30) !important;
+    }
+    .badge-incomplete {
+        background: rgba(245, 158, 11, 0.12) !important;
+        color: #b45309 !important;
+        border-color: rgba(245, 158, 11, 0.35) !important;
     }
     .pricing-rubro-chip strong { color: #0f172a !important; }
     .btn-add-rubro {

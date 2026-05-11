@@ -167,10 +167,19 @@ const hrAdmin = (function () {
                 tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin empleados visibles.</td></tr>';
                 return;
             }
-            tbody.innerHTML = emps.map(e => `
+            tbody.innerHTML = emps.map(e => {
+                // PR-3a: un empleado se considera "perfil incompleto" cuando
+                // falta cargo, documento o fecha de ingreso. Eso pasa cuando
+                // se autocreó desde el alta del usuario y aún no se completó.
+                const incomplete = !e.position_id || !e.doc_id || !e.hire_date;
+                const incompleteBadge = incomplete
+                    ? `<span class="badge badge-incomplete" title="Faltan cargo, documento o fecha de ingreso">Perfil incompleto</span>`
+                    : '';
+                return `
                 <tr>
                     <td>
                         <strong>${escapeHtml(e.full_name)}</strong>
+                        ${incompleteBadge}
                         ${e.user_username ? `<br><small>@${escapeHtml(e.user_username)}</small>` : ''}
                     </td>
                     <td>${escapeHtml(e.position_title || '-')}</td>
@@ -178,12 +187,13 @@ const hrAdmin = (function () {
                     <td><span class="badge ${e.status === 'active' ? 'badge-success' : 'badge-danger'}">${escapeHtml(e.status)}</span></td>
                     <td>${escapeHtml(fmtDate(e.hire_date) || '-')}</td>
                     <td>
-                        <button class="btn-edit" onclick="hrAdmin.editEmployee(${e.id})">Editar</button>
+                        <button class="btn-edit" onclick="hrAdmin.editEmployee(${e.id})">${incomplete ? 'Completar' : 'Editar'}</button>
                         <button class="btn-edit" onclick="hrAdmin.viewBalance(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Saldo</button>
                         <button class="btn-delete" onclick="hrAdmin.deleteEmployee(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Eliminar</button>
                     </td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         } catch (err) {
             tbody.innerHTML = `<tr><td colspan="6" class="error">${escapeHtml(err.message)}</td></tr>`;
         }
@@ -765,9 +775,30 @@ const hrAdmin = (function () {
     // Inicializar listeners de tabs cuando el DOM está listo.
     document.addEventListener('DOMContentLoaded', setupTabs);
 
+    // PR-3a: backfill — crea hr_employees mínimos para users sin perfil.
+    // Pensado para una sola corrida después de crear muchos usuarios, pero
+    // es idempotente: si ya están todos sincronizados devuelve created: 0.
+    async function syncFromUsers() {
+        if (!confirm('Esto creará un perfil de empleado mínimo para cada usuario activo que aún no tenga uno. ¿Continuar?')) return;
+        try {
+            const r = await api('POST', '/api/hr/employees/sync-from-users');
+            const created = r.data?.created ?? 0;
+            const scanned = r.data?.total_scanned ?? 0;
+            if (created === 0) {
+                Notification.info('Todos los usuarios ya tienen perfil de empleado');
+            } else {
+                Notification.success(`Se crearon ${created} perfil(es) de empleado. Completá los datos faltantes (cargo, doc, fecha de ingreso).`);
+            }
+            loadEmployees();
+        } catch (err) {
+            Notification.error(err.message || 'Error al sincronizar empleados');
+        }
+    }
+
     return {
         loadMe,
         loadEmployees, openCreateEmployee, editEmployee, deleteEmployee, viewBalance,
+        syncFromUsers,
         loadHolidays, openCreateHoliday, deleteHoliday,
             openRegisterAttendance, viewAttendance,
         loadTimeOff, openCreateTimeOff,

@@ -142,7 +142,7 @@ class HrController {
             }
 
             const employees = await db.query(`
-                SELECT e.id, e.user_id, e.full_name, e.position_id, e.department_id,
+                SELECT e.id, e.user_id, e.full_name, e.doc_id, e.position_id, e.department_id,
                        e.manager_id, e.hire_date, e.status, e.created_at,
                        p.title AS position_title,
                        d.name AS department_name,
@@ -238,6 +238,42 @@ class HrController {
         } catch (err) {
             console.error('getMyEmployee:', err);
             res.status(500).json({ success: false, message: 'Error al obtener mi perfil' });
+        }
+    }
+
+    // PR-3a: backfill de hr_employees a partir de users existentes.
+    // Recorre todos los users que NO tienen un registro en hr_employees y
+    // crea uno mínimo (full_name, user_id, status='active'). Idempotente:
+    // si todos los users ya tienen empleado, devuelve { created: 0 }.
+    // El primer departamento del user (via user_departments) se asocia
+    // como department_id del empleado para que la lista por depto funcione.
+    static async syncEmployeesFromUsers(req, res) {
+        try {
+            const users = await db.query(`
+                SELECT u.id, u.full_name,
+                       (SELECT department_id FROM user_departments
+                        WHERE user_id = u.id ORDER BY id LIMIT 1) AS first_dept
+                FROM users u
+                LEFT JOIN hr_employees e ON e.user_id = u.id
+                WHERE e.id IS NULL AND u.is_active = 1
+            `);
+            let created = 0;
+            for (const u of users) {
+                try {
+                    await db.execute(
+                        `INSERT INTO hr_employees (user_id, full_name, department_id, status)
+                         VALUES (?, ?, ?, 'active')`,
+                        [u.id, u.full_name, u.first_dept || null]
+                    );
+                    created++;
+                } catch (e) {
+                    console.warn(`sync skip user ${u.id}:`, e.message);
+                }
+            }
+            res.json({ success: true, data: { created, total_scanned: users.length } });
+        } catch (err) {
+            console.error('syncEmployeesFromUsers:', err);
+            res.status(500).json({ success: false, message: 'Error en backfill de empleados' });
         }
     }
 

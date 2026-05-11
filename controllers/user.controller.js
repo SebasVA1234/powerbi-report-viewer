@@ -148,6 +148,21 @@ class UserController {
                 [username, email, hashedPassword, full_name, role, 1]
             );
 
+            // PR-3a: auto-crear el registro de empleado en hr_employees con
+            // los datos mínimos. El admin completa cargo/doc/fecha de ingreso
+            // después desde RRHH. Si esto falla NO rompe la creación del
+            // usuario — se loguea como warning y el admin podrá usar el
+            // botón "Sincronizar desde Usuarios" para crearlo más tarde.
+            try {
+                await db.execute(
+                    `INSERT INTO hr_employees (user_id, full_name, status)
+                     VALUES (?, ?, 'active')`,
+                    [result.lastInsertId, full_name]
+                );
+            } catch (hrErr) {
+                console.warn(`No se pudo crear hr_employee para user ${result.lastInsertId}:`, hrErr.message);
+            }
+
             await db.execute(
                 'INSERT INTO access_logs (user_id, action, ip_address) VALUES (?, ?, ?)',
                 [req.user.id, `created_user:${result.lastInsertId}`, req.ip || 'unknown']

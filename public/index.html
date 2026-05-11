@@ -358,7 +358,12 @@
                             <div id="hr-employees-tab" class="tab-content">
                                 <div class="tab-header">
                                     <h3>Empleados</h3>
-                                    <button class="btn btn-primary" onclick="hrAdmin.openCreateEmployee()">+ Nuevo Empleado</button>
+                                    <div style="display:flex; gap:0.5rem;">
+                                        <button class="btn btn-outline" onclick="hrAdmin.syncFromUsers()" title="Crea perfiles RRHH para los usuarios que aún no tienen uno (perfil mínimo, completá los datos después)">
+                                            ↻ Sincronizar desde Usuarios
+                                        </button>
+                                        <button class="btn btn-primary" onclick="hrAdmin.openCreateEmployee()">+ Nuevo Empleado</button>
+                                    </div>
                                 </div>
                                 <div class="rbac-filter-row">
                                     <label>Departamento:</label>

@@ -32,6 +32,12 @@ router.post('/employees',          authMiddleware, requirePermission('hr.write')
 router.put('/employees/:id',       authMiddleware, requirePermission('hr.write'), HrController.updateEmployee);
 router.delete('/employees/:id',    authMiddleware, requirePermission('hr.write'), HrController.deleteEmployee);
 
+// PR-3a: backfill — crea hr_employees para los users que no lo tienen.
+// Útil para usuarios creados antes de la auto-creación, o cuando el INSERT
+// del trigger en createUser falló silenciosamente.
+router.post('/employees/sync-from-users',
+    authMiddleware, requirePermission('hr.write'), HrController.syncEmployeesFromUsers);
+
 // PR-3b: Calendario de feriados + banco de días compensados.
 router.get('/holidays',            authMiddleware, HrController.listHolidays);
 router.post('/holidays',
