@@ -54,6 +54,9 @@ router.get('/audit-log',      authMiddleware, canManage, ctrl.listAuditLog);
 // ---- Cálculo (sin guardar) ----
 router.post('/cotizar',       authMiddleware, canUse, ctrl.calcular);
 
+// ---- PR-5c: PDF inline ----
+router.post('/cotizar-pdf',   authMiddleware, canUse, ctrl.cotizarPdf);
+
 // ---- Calcular Y guardar snapshot ----
 router.post('/cotizaciones',  authMiddleware, canUse, ctrl.guardarCotizacion);
 

@@ -506,7 +506,7 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
                         Guardar cotización
                     </button>
-                    <button type="button" class="btn btn-outline" id="cot-action-pdf" disabled title="Próximamente: PR-5c">
+                    <button type="button" class="btn btn-outline" id="cot-action-pdf">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                         Exportar PDF
                     </button>
@@ -521,6 +521,49 @@
         // Wire de los 3 botones de acción
         document.getElementById('cot-action-save').onclick = onGuardar;
         document.getElementById('cot-action-new').onclick = onNuevaCotizacion;
+        document.getElementById('cot-action-pdf').onclick = onExportarPDF;
+    }
+
+    // PR-5c: descarga PDF de la cotización actual. Hace POST con el mismo
+    // payload que /cotizar y trata la respuesta como blob.
+    async function onExportarPDF() {
+        if (!lastResult || !lastResult.input) {
+            Notification.error('Calculá primero antes de exportar');
+            return;
+        }
+        const btn = document.getElementById('cot-action-pdf');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = 'Generando PDF...';
+        try {
+            const r = await fetch('/api/cotizador/cotizar-pdf', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: 'Bearer ' + Utils.getToken()
+                },
+                body: JSON.stringify(lastResult.input)
+            });
+            if (!r.ok) {
+                const j = await r.json().catch(() => ({}));
+                throw new Error(j.message || `Error ${r.status} al generar PDF`);
+            }
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            // Disparar descarga
+            const m = lastResult.output.metadata;
+            const fname = `cotizacion-${m.origen.iata}-${m.destino.iata}-${new Date().toISOString().substring(0,10)}.pdf`;
+            const a = document.createElement('a');
+            a.href = url; a.download = fname;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            Notification.success('PDF descargado');
+        } catch (err) {
+            Notification.error(err.message || 'Error al generar PDF');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
     }
 
     // PR-5b: limpiar el form + zona de resultado para empezar de cero.

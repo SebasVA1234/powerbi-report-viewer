@@ -664,6 +664,30 @@ exports.calcular = async (req, res) => {
     }
 };
 
+// PR-5c: genera el PDF de una cotización en línea (sin guardar). Reusa el
+// motor de cálculo y luego lo serializa via pdfkit.
+exports.cotizarPdf = async (req, res) => {
+    try {
+        const result = await computarCotizacion(req.body);
+        const { buildCotizacionPDF } = require('./cotizador-pdf');
+        const doc = buildCotizacionPDF(result, {
+            user_full_name: req.user && req.user.full_name ? req.user.full_name : null,
+            generated_at: new Date().toISOString()
+        });
+        const ruta = `${result.metadata.origen.iata}-${result.metadata.destino.iata}`;
+        const fecha = new Date().toISOString().substring(0, 10);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition',
+            `attachment; filename="cotizacion-${ruta}-${fecha}.pdf"`);
+        doc.pipe(res);
+        doc.end();
+    } catch (e) {
+        const status = e.status || 500;
+        if (status >= 500) console.error('Error cotizarPdf:', e);
+        fail(res, e.message || 'Error al generar PDF', status);
+    }
+};
+
 exports.guardarCotizacion = async (req, res) => {
     try {
         const result = await computarCotizacion(req.body);
