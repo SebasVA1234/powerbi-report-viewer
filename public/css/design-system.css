@@ -68,6 +68,115 @@
     --content-max:  1400px;
 }
 
+/* ============================================================
+   LIGHT MODE — sigue el prefers-color-scheme del sistema operativo
+   ============================================================
+   Override de tokens cuando el usuario tiene tema claro en su OS.
+   Mantenemos la identidad de marca (gradient-brand, primary, accent)
+   y solo invertimos backgrounds/textos/bordes para legibilidad.
+   ============================================================ */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-page:        #f8fafc;        /* slate-50 */
+        --bg-app:         #ffffff;
+        --bg-card:        #ffffff;
+        --bg-elevated:    #f1f5f9;        /* slate-100 */
+        --bg-hover:       rgba(15, 23, 42, 0.04);
+        --bg-input:       #f8fafc;        /* slate-50 */
+
+        --text-1:         #0f172a;        /* slate-900 — primario en claro */
+        --text-2:         #334155;        /* slate-700 — secundario */
+        --text-3:         #64748b;        /* slate-500 — terciario / placeholders */
+
+        --border:         rgba(15, 23, 42, 0.10);
+        --border-strong:  rgba(15, 23, 42, 0.18);
+
+        --gradient-card:  linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0) 100%);
+        --gradient-page:  radial-gradient(ellipse at top, #e0e7ff 0%, #f8fafc 60%);
+
+        --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
+        --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.14);
+    }
+
+    /* Login card en light: sin glow violeta tan fuerte */
+    .login-card {
+        box-shadow: var(--shadow-lg) !important;
+    }
+    /* Scrollbar más sutil en light */
+    ::-webkit-scrollbar-thumb {
+        background: rgba(15, 23, 42, 0.12) !important;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(15, 23, 42, 0.24) !important;
+    }
+    /* Orbs decorativos: bajar opacidad para no saturar el fondo claro */
+    .orb { opacity: 0.18 !important; }
+
+    /* Glass cards y rgba blancas hardcodeadas: en light mode el bg blanco
+       hace que los rgba(255,255,255,0.04) se pierdan. Repintar con tints
+       oscuros sutiles para mantener la jerarquía visual. */
+    .pricing-row,
+    .cot-meta-item,
+    .cot-escenario,
+    .setting-item {
+        background: rgba(15, 23, 42, 0.03) !important;
+    }
+    .rate-input-wrapper {
+        background: rgba(15, 23, 42, 0.04) !important;
+    }
+    .cotizador-mode-toggle {
+        background: rgba(15, 23, 42, 0.04) !important;
+    }
+    .reports-counter,
+    #stat-reports,
+    #stat-documents,
+    .category-count,
+    .welcome-actions .btn,
+    .welcome-actions button,
+    .btn-refresh,
+    button.btn-outline {
+        background: rgba(15, 23, 42, 0.04) !important;
+    }
+    /* Notification toasts — en light el bg-card es blanco, agregar borde
+       para destacar del fondo de la página */
+    #notification-container .notification,
+    .notification {
+        box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18) !important;
+    }
+    /* Sidebar en light */
+    .sidebar {
+        background: rgba(255, 255, 255, 0.85) !important;
+        border-right: 1px solid var(--border) !important;
+    }
+    /* Top bar en light */
+    .topbar {
+        background: rgba(255, 255, 255, 0.85) !important;
+        border-bottom: 1px solid var(--border) !important;
+    }
+    /* Brand gradient text — funciona igual en light, solo aclarar el primary
+       para que no quede ilegible sobre fondos blancos */
+    .login-header h1,
+    .gradient-text {
+        background: linear-gradient(135deg, var(--primary-dark), #047857) !important;
+        -webkit-background-clip: text !important;
+        background-clip: text !important;
+    }
+    /* Hover en cards de reportes — usar tint oscuro */
+    .report-card:hover, .document-card:hover, .category-card:hover {
+        box-shadow: var(--shadow-lg), 0 0 30px rgba(99, 102, 241, 0.2) !important;
+    }
+    /* Modal overlay más oscuro en light para contraste */
+    .modal,
+    .confirm-dialog-overlay {
+        background-color: rgba(15, 23, 42, 0.5) !important;
+    }
+    /* Inputs en light */
+    input::placeholder, textarea::placeholder {
+        color: var(--text-3) !important;
+    }
+}
+
 /* ===== Reset/base sobre el html previo ===== */
 * {
     box-sizing: border-box;

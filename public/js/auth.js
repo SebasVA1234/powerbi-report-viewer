@@ -310,20 +310,68 @@ async function loadProfileData() {
     }
 }
 
+// Cache de permisos del user logueado (cargado desde /api/rbac/me/context).
+// Evita pedir el contexto en cada navegación. Se invalida en logout.
+window.__userPerms = null;
+window.__userIsAdmin = false;
+
+async function loadUserPermsContext() {
+    try {
+        const r = await fetch('/api/rbac/me/context', {
+            headers: { Authorization: 'Bearer ' + Utils.getToken() }
+        });
+        const j = await r.json();
+        if (j && j.success && j.data) {
+            window.__userPerms = new Set(j.data.permissions || []);
+            window.__userIsAdmin = !!j.data.isAdmin;
+        }
+    } catch (e) {
+        console.warn('No se pudo cargar contexto de permisos:', e);
+        window.__userPerms = new Set();
+        window.__userIsAdmin = false;
+    }
+}
+
+// Helper: chequea si el user tiene alguno de los permisos listados (separados por coma)
+// O si es admin (los admins tienen todo). Usado por applyPermissionGating().
+function userHasAnyPermission(permList) {
+    if (window.__userIsAdmin) return true;
+    if (!window.__userPerms) return false;
+    return permList.split(',').map(p => p.trim()).some(p => window.__userPerms.has(p));
+}
+
+// Aplica visibilidad a TODO elemento con [data-permission]: si el user no
+// tiene ninguno de los permisos listados, se oculta (display: none). Esto
+// gatea sidebar links, tabs internos, botones, lo que sea.
+// Convención: data-permission="perm1,perm2" → visible si tiene perm1 O perm2.
+function applyPermissionGating() {
+    document.querySelectorAll('[data-permission]').forEach(el => {
+        const perms = el.dataset.permission;
+        const allowed = userHasAnyPermission(perms);
+        // No tocamos elementos que ya tienen .admin-only (ya se gestionan abajo).
+        if (el.classList.contains('admin-only')) return;
+        el.style.display = allowed ? '' : 'none';
+    });
+}
+
 // Update User Display
-function updateUserDisplay() {
+async function updateUserDisplay() {
     const user = Auth.getCurrentUser();
     if (user) {
         const userNameElement = document.getElementById('current-user-name');
         const userRoleElement = document.getElementById('current-user-role');
-        
+
         if (userNameElement) userNameElement.textContent = user.full_name || user.username;
         if (userRoleElement) userRoleElement.textContent = user.role === 'admin' ? 'Administrador' : 'Usuario';
-        
+
         // Show/hide admin menu
         const adminMenu = document.querySelector('.admin-only');
         if (adminMenu) {
             adminMenu.style.display = user.role === 'admin' ? 'flex' : 'none';
         }
+
+        // Cargar contexto RBAC y aplicar gating a [data-permission].
+        await loadUserPermsContext();
+        applyPermissionGating();
     }
 }
