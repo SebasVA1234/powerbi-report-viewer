@@ -48,7 +48,25 @@ const powerbiFrames = [
     "https://app.powerbi.com",
     "https://app.fabric.microsoft.com",
     "https://*.powerbi.com",
-    "https://*.fabric.microsoft.com"
+    "https://*.fabric.microsoft.com",
+    // Microsoft OAuth — el iframe de Power BI redirige a login.microsoftonline.com
+    // para el flow de autenticación. Sin estos dominios el CSP bloquea el redirect
+    // y el iframe queda en blanco (sin mostrar "Sign in" ni nada).
+    "https://login.microsoftonline.com",
+    "https://login.microsoft.com",
+    "https://login.windows.net",
+    "https://*.microsoftonline.com",
+    "https://*.windows.net",
+    "https://aadcdn.msftauth.net"
+];
+// Conexiones XHR/fetch que el portal hace además de las del iframe. Power BI
+// usa endpoints de api.powerbi.com y wabi-*.analysis.windows.net para datos.
+const microsoftConnect = [
+    "https://*.powerbi.com",
+    "https://*.microsoft.com",
+    "https://*.microsoftonline.com",
+    "https://*.windows.net",
+    "https://*.azure.com"
 ];
 app.use(helmet({
     contentSecurityPolicy: {
@@ -62,11 +80,15 @@ app.use(helmet({
             'style-src':  ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             'font-src':   ["'self'", "data:", "https://fonts.gstatic.com"],
             'img-src':    ["'self'", "data:", "https:"],
-            'connect-src':["'self'"],
+            'connect-src':["'self'", ...microsoftConnect],
             'frame-ancestors': ["'self'"],
             'worker-src': ["'self'", "blob:"],
             'frame-src':  ["'self'", ...powerbiFrames],
-            'child-src':  ["'self'", "blob:", ...powerbiFrames]
+            'child-src':  ["'self'", "blob:", ...powerbiFrames],
+            // form-action permite que el form POST del login OAuth de Microsoft
+            // (action="https://login.microsoftonline.com/...") complete sin que
+            // el browser lo bloquee por política CSP.
+            'form-action': ["'self'", ...powerbiFrames]
         }
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
