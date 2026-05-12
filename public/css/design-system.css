@@ -1945,6 +1945,208 @@ input[type="file"]::file-selector-button:hover {
 }
 
 /* ============================================================
+   PR-8a · Tarjetas "Por Departamento" en Administración
+   ============================================================
+   Reemplaza el flujo individual user-by-user con tarjetas departamentales:
+   asignar reportes/documentos/módulos al depto entero y todos sus
+   miembros heredan automáticamente. Excepciones individuales siguen
+   disponibles via el botón "Editar" de cada persona.
+   ============================================================ */
+.by-dept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1rem;
+    margin-top: 0.85rem;
+}
+.by-dept-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    transition: border-color var(--transition-fast);
+}
+.by-dept-card:hover { border-color: var(--primary); }
+.by-dept-card-orphan {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+.by-dept-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.by-dept-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+.by-dept-card-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+.by-dept-card-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-1);
+    line-height: 1.2;
+}
+.by-dept-card-count {
+    font-size: 0.78rem;
+    color: var(--text-3);
+    margin-top: 2px;
+}
+.by-dept-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.4rem;
+}
+.by-dept-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.65rem 0.4rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.by-dept-action-btn:hover {
+    background: rgba(99, 102, 241, 0.10);
+    border-color: rgba(99, 102, 241, 0.35);
+    color: var(--text-1);
+}
+.by-dept-action-btn svg {
+    color: var(--primary-light);
+}
+.by-dept-people-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+    margin-top: 0.25rem;
+}
+.by-dept-people-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.by-dept-person {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.55rem;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+.by-dept-person:hover { background: rgba(99, 102, 241, 0.08); }
+.by-dept-avatar {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--gradient-brand);
+    color: white;
+    font-size: 0.78rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.by-dept-person-info {
+    flex: 1;
+    min-width: 0;
+}
+.by-dept-person-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.by-dept-person-meta {
+    font-size: 0.72rem;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.by-dept-admin-tag {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.by-dept-person-edit {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-3);
+    width: 28px; height: 28px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+.by-dept-person-edit:hover {
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--primary-light);
+    border-color: rgba(99, 102, 241, 0.35);
+}
+.by-dept-empty {
+    font-size: 0.82rem;
+    color: var(--text-3);
+    font-style: italic;
+    text-align: center;
+    padding: 0.85rem;
+}
+
+@media (prefers-color-scheme: light) {
+    .by-dept-card { background: #ffffff !important; }
+    .by-dept-card-orphan {
+        background: rgba(245, 158, 11, 0.05) !important;
+        border-color: rgba(245, 158, 11, 0.30) !important;
+    }
+    .by-dept-action-btn {
+        background: rgba(15, 23, 42, 0.04) !important;
+        border-color: var(--border) !important;
+    }
+    .by-dept-action-btn:hover {
+        background: rgba(99, 102, 241, 0.06) !important;
+    }
+    .by-dept-action-btn svg { color: var(--primary-dark) !important; }
+    .by-dept-person {
+        background: rgba(15, 23, 42, 0.03) !important;
+    }
+    .by-dept-person:hover {
+        background: rgba(99, 102, 241, 0.06) !important;
+    }
+    .by-dept-admin-tag {
+        background: rgba(239, 68, 68, 0.10) !important;
+        color: #b91c1c !important;
+    }
+}
+
+/* ============================================================
    PR-3b · Toolbar de filtros y headers ordenables en Admin > Usuarios
    ============================================================ */
 .users-toolbar {
