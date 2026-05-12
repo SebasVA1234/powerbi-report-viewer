@@ -71,7 +71,13 @@ app.use(helmet({
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
     crossOriginEmbedderPolicy: false,
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+    // 'strict-origin-when-cross-origin' rompía el OAuth popup de Power BI:
+    // Microsoft necesita el referrer completo para validar la sesión del
+    // user al hacer Sign-in dentro del iframe. Con la política estricta el
+    // popup quedaba en about:blank. 'origin-when-cross-origin' es el
+    // balance: mantiene la privacidad (no exporta paths internos cross-site)
+    // pero envía el origin que Microsoft necesita.
+    referrerPolicy: { policy: 'origin-when-cross-origin' }
 }));
 
 // Rate limiting (Seguridad contra ataques de fuerza bruta)
