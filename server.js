@@ -93,6 +93,17 @@ app.use(helmet({
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
     crossOriginEmbedderPolicy: false,
+    // CRÍTICO para Power BI OAuth: COOP=same-origin (default de helmet) aísla
+    // los popups del iframe cross-origin. Resultado: Power BI abre el popup
+    // de Sign-in, intenta navegarlo a login.microsoftonline.com, pero como
+    // el popup está "isolated" no recibe la URL → queda en about:blank.
+    // 'unsafe-none' (o false) restaura el comportamiento clásico donde el
+    // iframe SÍ puede controlar su propio popup.
+    crossOriginOpenerPolicy: false,
+    // CORP=same-origin (default) bloquea recursos de Microsoft (CDN de
+    // login, imágenes del form) cuando son cross-origin. 'cross-origin'
+    // permite que assets de otros dominios se carguen sin error.
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     // 'strict-origin-when-cross-origin' rompía el OAuth popup de Power BI:
     // Microsoft necesita el referrer completo para validar la sesión del
     // user al hacer Sign-in dentro del iframe. Con la política estricta el
