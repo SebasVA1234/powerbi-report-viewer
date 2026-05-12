@@ -68,7 +68,7 @@
                                 <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                                 <polyline points="9 22 9 12 15 12 15 22"></polyline>
                             </svg>
-                            <span>Inicio</span>
+                            <span>Reportes</span>
                         </button>
                         <button class="nav-link" data-section="documents">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -93,7 +93,11 @@
                                 <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
                                 <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                             </svg>
-                            <span>RRHH</span>
+                            <!-- Label dinámica: "Recursos Humanos" si el user tiene
+                                 hr.write (rol RRHH); "Solicitudes" para empleados/
+                                 jefes que solo gestionan sus propias vacaciones y
+                                 ven memos. La lógica de cambio está en auth.js. -->
+                            <span id="hr-nav-label">Solicitudes</span>
                         </button>
                         <button class="nav-link" data-section="profile">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

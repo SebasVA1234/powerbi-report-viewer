@@ -352,6 +352,29 @@ function applyPermissionGating() {
         if (el.classList.contains('admin-only')) return;
         el.style.display = allowed ? '' : 'none';
     });
+    // El módulo RRHH se llama distinto según el rol del user:
+    // - "Recursos Humanos" para quienes gestionan el módulo (rol RRHH con
+    //   hr.write o hr.read.all): ven empleados, feriados, memos, etc.
+    // - "Solicitudes" para empleados y jefes: solo ven su perfil + sus
+    //   vacaciones + memos dirigidos a ellos.
+    const hrLabel = document.getElementById('hr-nav-label');
+    if (hrLabel) {
+        const isHrManager = userHasAnyPermission('hr.write,hr.read.all');
+        hrLabel.textContent = isHrManager ? 'Recursos Humanos' : 'Solicitudes';
+    }
+    // El header de la sección hr también cambia su título según el rol.
+    const hrSectionTitle = document.querySelector('#hr-section .welcome-header h1');
+    const hrSectionSubtitle = document.querySelector('#hr-section .welcome-header p');
+    if (hrSectionTitle && hrSectionSubtitle) {
+        const isHrManager = userHasAnyPermission('hr.write,hr.read.all');
+        if (isHrManager) {
+            hrSectionTitle.textContent = 'Recursos Humanos';
+            hrSectionSubtitle.textContent = 'Gestión del equipo, feriados, solicitudes y memos.';
+        } else {
+            hrSectionTitle.textContent = 'Mis Solicitudes';
+            hrSectionSubtitle.textContent = 'Tu perfil, calendario de feriados, vacaciones y memos.';
+        }
+    }
 }
 
 // Update User Display
