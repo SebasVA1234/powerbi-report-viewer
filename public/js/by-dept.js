@@ -247,9 +247,111 @@
             list.innerHTML = `<div class="error" style="padding:1rem; text-align:center; color:var(--danger);">Error al cargar documentos</div>`;
         }
     }
-    function openModules(deptId, deptName) {
-        if (typeof Notification !== 'undefined' && Notification.info) {
-            Notification.info(`Switches de módulos (Cotizador, RRHH, etc) para "${deptName}" — modal en construcción (PR-8d).`);
+    // PR-8d: modal "Módulos del depto". Lista los usuarios del depto y por
+    // cada uno muestra qué módulos puede usar (heredados de su rol RBAC).
+    // El admin ve un panorama claro y, si quiere cambiar permisos, click en
+    // "Editar" abre el modal individual que ya existe.
+    //
+    // NOTA: la asignación masiva de un permiso a todo el depto requiere la
+    // tabla user_permission_overrides (planeada en PR-2a, no implementada).
+    // Hasta tenerla, el flow es: el admin ve quién tiene qué, y cambia
+    // user-por-user via el botón Editar.
+    async function openModules(deptId, deptName) {
+        let modal = document.getElementById('dept-modules-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'dept-modules-modal';
+            modal.className = 'modal';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 780px;">
+                    <div class="modal-header">
+                        <h3 class="dept-modules-title">Módulos del departamento</h3>
+                        <button class="btn-close" onclick="document.getElementById('dept-modules-modal').classList.remove('active')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="font-size:0.85rem; color:var(--text-3); margin: 0 0 0.85rem 0;">
+                            Qué módulos puede usar cada persona del departamento. Los permisos vienen del <strong>rol RBAC</strong> de cada user. Para cambiarlos, click en <strong>Editar</strong> del usuario.
+                        </p>
+                        <div class="dept-modules-table-wrap">
+                            <table class="dept-modules-table">
+                                <thead>
+                                    <tr>
+                                        <th>Persona</th>
+                                        <th title="Sección Reportes">📊 Reportes</th>
+                                        <th title="Sección Documentos">📄 Docs</th>
+                                        <th title="Sección Cotizador">💲 Cotizador</th>
+                                        <th title="Sección RRHH/Solicitudes">👥 RRHH</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dept-modules-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('dept-modules-modal').classList.remove('active')">Cerrar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        modal.querySelector('.dept-modules-title').textContent = `Módulos del depto: ${deptName}`;
+        const tbody = modal.querySelector('#dept-modules-tbody');
+        tbody.innerHTML = '<tr><td colspan="6" class="loading" style="text-align:center; padding:1rem; color:var(--text-3);">Cargando…</td></tr>';
+        modal.classList.add('active');
+
+        const dept = _depts.find(d => Number(d.id) === Number(deptId));
+        if (!dept) return;
+        const users = usersOfDept(dept.name);
+        if (users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty" style="text-align:center; padding:1rem; color:var(--text-3); font-style:italic;">Sin personas en este departamento</td></tr>`;
+            return;
+        }
+
+        try {
+            const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+            // Cargar el contexto RBAC de cada user (paralelo)
+            const contexts = await Promise.all(
+                users.map(u =>
+                    fetch(`/api/rbac/users/${u.id}/context`, { headers })
+                        .then(r => r.json())
+                        .then(j => ({ user: u, ctx: j.data || j }))
+                        .catch(err => ({ user: u, ctx: null, err }))
+                )
+            );
+            tbody.innerHTML = contexts.map(({ user, ctx }) => {
+                const perms = new Set((ctx?.permissions) || []);
+                const isAdmin = user.role === 'admin' || perms.has('system.admin');
+                const has = (p) => isAdmin || perms.has(p);
+                const cell = (ok) => ok
+                    ? '<span class="dept-mod-yes" title="Tiene acceso">✓</span>'
+                    : '<span class="dept-mod-no" title="Sin acceso">—</span>';
+                return `
+                    <tr>
+                        <td>
+                            <div class="dept-mod-person">
+                                <div class="by-dept-avatar" style="width:26px; height:26px; font-size:0.72rem;">${escapeHtml((user.full_name || user.username || '?').charAt(0).toUpperCase())}</div>
+                                <div>
+                                    <div style="font-size:0.85rem; font-weight:600; color:var(--text-1);">${escapeHtml(user.full_name)}</div>
+                                    <div style="font-size:0.72rem; color:var(--text-3);">${escapeHtml(user.email)}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>${cell(true)}</td>
+                        <td>${cell(true)}</td>
+                        <td>${cell(has('cotizador.use'))}</td>
+                        <td>${cell(has('hr.read.own'))}</td>
+                        <td>
+                            <button class="btn-edit" onclick="openUserPermissions(${user.id}); document.getElementById('dept-modules-modal').classList.remove('active');" title="Editar permisos">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('openModules error:', err);
+            tbody.innerHTML = `<tr><td colspan="6" class="error" style="text-align:center; padding:1rem; color:var(--danger);">Error al cargar permisos</td></tr>`;
         }
     }
 

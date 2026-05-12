@@ -2120,6 +2120,73 @@ input[type="file"]::file-selector-button:hover {
     padding: 0.85rem;
 }
 
+/* PR-8d: modal "Módulos del departamento" — matriz read-only de quién
+   tiene acceso a qué módulo, con redirección al modal individual para
+   modificar permisos. */
+.dept-modules-table-wrap {
+    overflow-x: auto;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.dept-modules-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.dept-modules-table thead {
+    background: var(--bg-elevated);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.dept-modules-table th {
+    text-align: left;
+    padding: 0.65rem 0.75rem;
+    color: var(--text-3);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.dept-modules-table th:not(:first-child):not(:last-child) {
+    text-align: center;
+    width: 80px;
+}
+.dept-modules-table td {
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+    color: var(--text-1);
+}
+.dept-modules-table td:not(:first-child):not(:last-child) {
+    text-align: center;
+}
+.dept-modules-table tbody tr:hover {
+    background: rgba(99, 102, 241, 0.06);
+}
+.dept-mod-person {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.dept-mod-yes {
+    color: var(--accent-light, #6ee7b7);
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+.dept-mod-no {
+    color: var(--text-3);
+    font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: light) {
+    .dept-modules-table thead {
+        background: rgba(15, 23, 42, 0.04) !important;
+    }
+    .dept-mod-yes { color: #047857 !important; }
+}
+
 /* PR-8b: modal de "Gestionar Reportes/Documentos" del departamento */
 .dept-resource-list {
     display: flex;
