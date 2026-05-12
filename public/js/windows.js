@@ -106,7 +106,12 @@ class WindowManager {
                 </div>
             </div>
             <div class="window-body">
-                ${this.renderWindowBody(embedUrl, windowId)}
+                <div class="window-loading"><div class="loading-spinner"></div><span>Cargando reporte...</span></div>
+                <iframe class="window-iframe"
+                        src="${embedUrl}"
+                        allowfullscreen="true"
+                        allow="fullscreen; clipboard-read; clipboard-write"
+                        referrerpolicy="strict-origin-when-cross-origin"></iframe>
             </div>
             <div class="window-resize-handle" data-window-id="${windowId}"></div>
         `;
@@ -121,103 +126,13 @@ class WindowManager {
         
         windowEl.querySelector('.window-resize-handle').addEventListener('mousedown', (e) => this.startResize(e, windowId));
         windowEl.addEventListener('mousedown', () => this.focusWindow(windowId));
-        // Solo wire el listener del iframe si efectivamente hay iframe (las
-        // ventanas con auth-intro no lo tienen).
-        const iframeEl = windowEl.querySelector('.window-iframe');
-        if (iframeEl) {
-            iframeEl.addEventListener('load', () => {
-                const loadEl = windowEl.querySelector('.window-loading');
-                if (loadEl) loadEl.style.display = 'none';
-            });
-        }
+        windowEl.querySelector('.window-iframe').addEventListener('load', () => { windowEl.querySelector('.window-loading').style.display = 'none'; });
         
         this.addToTaskbar(windowId, title);
         this.focusWindow(windowId);
         document.body.classList.add('has-taskbar');
         this.updateWindowCount();
         return windowId;
-    }
-
-    // PR-7: distinguir el tipo de URL del reporte. Las URLs de "Sitio web o
-    // portal" (reportEmbed?reportId=...&autoAuth=true) requieren cookies de
-    // Microsoft, que el browser bloquea dentro de un iframe cross-origin →
-    // iframe queda en blanco. Para esos casos mostramos una pantalla intro
-    // explicando el comportamiento y un botón que abre en pestaña nueva
-    // donde sí está la sesión de M365.
-    // Las URLs de "Publicar en la web" (view?r=...) son públicas y se
-    // embeben directo sin auth.
-    needsExternalAuth(url) {
-        if (!url || typeof url !== 'string') return false;
-        return /\/reportEmbed\?|autoAuth=true/i.test(url);
-    }
-
-    renderWindowBody(embedUrl, windowId) {
-        if (this.needsExternalAuth(embedUrl)) {
-            // Pantalla intro con explicación + botón grande
-            return `
-                <div class="window-auth-intro">
-                    <div class="auth-intro-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="56" height="56">
-                            <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                    </div>
-                    <h3>Este reporte necesita tu sesión de Microsoft</h3>
-                    <p class="auth-intro-text">
-                        El reporte está configurado para usar tu cuenta de Microsoft. Por seguridad del navegador, no podemos cargarlo dentro del portal — tenés que abrirlo en una pestaña nueva donde ya tengas iniciada sesión en Microsoft 365.
-                    </p>
-                    <button type="button" class="btn btn-primary auth-intro-btn"
-                            onclick="windowManager.openExternal(${windowId})">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" style="margin-right:6px;">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                            <polyline points="15 3 21 3 21 9"></polyline>
-                            <line x1="10" y1="14" x2="21" y2="3"></line>
-                        </svg>
-                        Abrir reporte en pestaña nueva
-                    </button>
-                    <details class="auth-intro-help">
-                        <summary>¿Por qué pasa esto? (técnico)</summary>
-                        <p>
-                            Tu URL es del tipo <code>app.powerbi.com/reportEmbed?...</code> ("Sitio web o portal" en Power BI). Microsoft intenta auto-loguear con cookies de tu cuenta M365, pero los navegadores modernos bloquean las cookies de terceros dentro de iframes externos — eso deja el reporte en blanco.
-                        </p>
-                        <p>
-                            <strong>Soluciones permanentes:</strong> en Power BI Service, republicá el reporte usando <strong>"Publicar en la web (público)"</strong> en lugar de "Sitio web o portal" — esa opción genera una URL <code>view?r=...</code> que sí carga embebida. O migremos el portal a Power BI Embedded ("App Owns Data").
-                        </p>
-                    </details>
-                </div>
-            `;
-        }
-        // URL pública (publish-to-web) → iframe directo
-        return `
-            <div class="window-loading"><div class="loading-spinner"></div><span>Cargando reporte...</span></div>
-            <iframe class="window-iframe"
-                    src="${embedUrl}"
-                    allowfullscreen="true"
-                    allow="fullscreen; clipboard-read; clipboard-write"
-                    referrerpolicy="strict-origin-when-cross-origin"></iframe>
-        `;
-    }
-
-    // PR-7: abre la URL del reporte en una pestaña nueva del browser.
-    // Usa el patrón <a target="_blank" rel="noopener"> que pasa el bloqueador
-    // de popups porque viene de un click directo del usuario.
-    openExternal(windowId) {
-        const win = this.windows.get(windowId);
-        if (!win) return;
-        const url = win.embedUrl;
-        if (!url || !/^https?:\/\//i.test(url)) {
-            if (typeof Notification !== 'undefined' && Notification.error) {
-                Notification.error('Este reporte no tiene URL configurada.');
-            }
-            return;
-        }
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
     }
 
     closeWindow(windowId) {
