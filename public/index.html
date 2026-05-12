@@ -1435,18 +1435,40 @@
                             <div class="pbi-url-help">
                                 <details>
                                     <summary>¿De dónde saco esta URL?</summary>
+                                    <p class="pbi-url-critical">
+                                        ⚠️ <strong>OJO con la opción correcta en Power BI.</strong> Microsoft tiene <u>dos</u> menús parecidos pero solo uno sirve:
+                                    </p>
+                                    <table class="pbi-options-table">
+                                        <tr>
+                                            <th>Opción de Power BI</th>
+                                            <th>URL que da</th>
+                                            <th>¿Funciona acá?</th>
+                                        </tr>
+                                        <tr class="pbi-opt-bad">
+                                            <td>Incrustar → <strong>Sitio web o portal</strong></td>
+                                            <td><code>.../reportEmbed?reportId=...</code></td>
+                                            <td>❌ Pide Sign-in</td>
+                                        </tr>
+                                        <tr class="pbi-opt-good">
+                                            <td>Incrustar → <strong>Publicar en la web (público)</strong></td>
+                                            <td><code>.../view?r=...</code></td>
+                                            <td>✅ Carga directo</td>
+                                        </tr>
+                                    </table>
                                     <ol>
-                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte que querés agregar</li>
-                                        <li>Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></li>
-                                        <li>Microsoft te muestra una advertencia → confirmá</li>
-                                        <li>Copiá la <strong>URL de iframe</strong> (la que empieza con <code>https://app.powerbi.com/view?r=</code>)</li>
+                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte</li>
+                                        <li>Menú <strong>Archivo → Incrustar informe → "Publicar en la web (público)"</strong> <span class="pbi-not">(NO "Sitio web o portal")</span></li>
+                                        <li>Microsoft te muestra una advertencia "esto será público" → confirmá</li>
+                                        <li>Copiá la <strong>URL de iframe</strong>: la que empieza con <code>https://app.powerbi.com/view?r=</code></li>
                                         <li>Pegala en este campo</li>
                                     </ol>
                                     <p class="pbi-url-warn">⚠️ La URL es <strong>como una contraseña</strong>: cualquiera que la conozca puede ver el reporte. Compartila solo dentro del portal.</p>
                                 </details>
                             </div>
                             <div class="pbi-url-warning" data-pbi-warning style="display:none;">
-                                ⚠️ Esta URL no parece ser de <strong>Publicar en la Web</strong>. Las URLs que requieren login de Microsoft (como <code>app.powerbi.com/reportEmbed?reportId=...</code>) no se cargan correctamente en el portal — el reporte aparecerá en blanco. Usá la URL de "Publicar en la Web (público)".
+                                ⚠️ <strong>Esta URL es de "Sitio web o portal", no de "Publicar en la web".</strong><br>
+                                Las URLs <code>.../reportEmbed?reportId=...</code> requieren que cada usuario haga login a Microsoft — y eso queda bloqueado por el navegador dentro del iframe.<br>
+                                Volvé a Power BI Service → Archivo → Incrustar informe → <strong>"Publicar en la web (público)"</strong> y copiá la URL <code>.../view?r=...</code>.
                             </div>
                         </div>
                         <div class="form-group">
@@ -1486,18 +1508,40 @@
                             <div class="pbi-url-help">
                                 <details>
                                     <summary>¿De dónde saco esta URL?</summary>
+                                    <p class="pbi-url-critical">
+                                        ⚠️ <strong>OJO con la opción correcta en Power BI.</strong> Microsoft tiene <u>dos</u> menús parecidos pero solo uno sirve:
+                                    </p>
+                                    <table class="pbi-options-table">
+                                        <tr>
+                                            <th>Opción de Power BI</th>
+                                            <th>URL que da</th>
+                                            <th>¿Funciona acá?</th>
+                                        </tr>
+                                        <tr class="pbi-opt-bad">
+                                            <td>Incrustar → <strong>Sitio web o portal</strong></td>
+                                            <td><code>.../reportEmbed?reportId=...</code></td>
+                                            <td>❌ Pide Sign-in</td>
+                                        </tr>
+                                        <tr class="pbi-opt-good">
+                                            <td>Incrustar → <strong>Publicar en la web (público)</strong></td>
+                                            <td><code>.../view?r=...</code></td>
+                                            <td>✅ Carga directo</td>
+                                        </tr>
+                                    </table>
                                     <ol>
-                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte que querés agregar</li>
-                                        <li>Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></li>
-                                        <li>Microsoft te muestra una advertencia → confirmá</li>
-                                        <li>Copiá la <strong>URL de iframe</strong> (la que empieza con <code>https://app.powerbi.com/view?r=</code>)</li>
+                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte</li>
+                                        <li>Menú <strong>Archivo → Incrustar informe → "Publicar en la web (público)"</strong> <span class="pbi-not">(NO "Sitio web o portal")</span></li>
+                                        <li>Microsoft te muestra una advertencia "esto será público" → confirmá</li>
+                                        <li>Copiá la <strong>URL de iframe</strong>: la que empieza con <code>https://app.powerbi.com/view?r=</code></li>
                                         <li>Pegala en este campo</li>
                                     </ol>
                                     <p class="pbi-url-warn">⚠️ La URL es <strong>como una contraseña</strong>: cualquiera que la conozca puede ver el reporte. Compartila solo dentro del portal.</p>
                                 </details>
                             </div>
                             <div class="pbi-url-warning" data-pbi-warning style="display:none;">
-                                ⚠️ Esta URL no parece ser de <strong>Publicar en la Web</strong>. Las URLs que requieren login de Microsoft (como <code>app.powerbi.com/reportEmbed?reportId=...</code>) no se cargan correctamente en el portal — el reporte aparecerá en blanco. Usá la URL de "Publicar en la Web (público)".
+                                ⚠️ <strong>Esta URL es de "Sitio web o portal", no de "Publicar en la web".</strong><br>
+                                Las URLs <code>.../reportEmbed?reportId=...</code> requieren que cada usuario haga login a Microsoft — y eso queda bloqueado por el navegador dentro del iframe.<br>
+                                Volvé a Power BI Service → Archivo → Incrustar informe → <strong>"Publicar en la web (público)"</strong> y copiá la URL <code>.../view?r=...</code>.
                             </div>
                         </div>
                         <div class="form-group">

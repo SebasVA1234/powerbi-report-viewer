@@ -1839,6 +1839,59 @@ input[type="file"]::file-selector-button:hover {
     color: #fcd34d;
     font-size: 0.78rem;
 }
+.pbi-url-help .pbi-url-critical {
+    margin: 0.6rem 0 0.5rem 0;
+    padding: 0.55rem 0.7rem;
+    background: rgba(239, 68, 68, 0.10);
+    border-left: 3px solid var(--danger);
+    border-radius: 4px;
+    color: #fca5a5;
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+.pbi-url-help .pbi-url-critical u {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.pbi-options-table {
+    width: 100%;
+    margin: 0.4rem 0 0.6rem 0;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+    background: var(--bg-card);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.pbi-options-table th,
+.pbi-options-table td {
+    text-align: left;
+    padding: 0.4rem 0.55rem;
+    border-bottom: 1px solid var(--border);
+}
+.pbi-options-table th {
+    background: rgba(99, 102, 241, 0.10);
+    color: var(--text-2);
+    font-weight: 700;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.pbi-options-table tr:last-child td { border-bottom: none; }
+.pbi-options-table .pbi-opt-bad { background: rgba(239, 68, 68, 0.06); }
+.pbi-options-table .pbi-opt-good { background: rgba(16, 185, 129, 0.06); }
+.pbi-options-table code {
+    background: rgba(15, 23, 42, 0.25);
+    color: var(--text-1);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+.pbi-not {
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.78rem;
+}
 .pbi-url-warning {
     margin-top: 0.5rem;
     padding: 0.65rem 0.85rem;
@@ -1864,6 +1917,10 @@ input[type="file"]::file-selector-button:hover {
         color: #92400e !important;
         background: rgba(245, 158, 11, 0.08) !important;
     }
+    .pbi-url-help .pbi-url-critical {
+        color: #b91c1c !important;
+        background: rgba(239, 68, 68, 0.06) !important;
+    }
     .pbi-url-warning {
         background: rgba(239, 68, 68, 0.06) !important;
         color: #b91c1c !important;
@@ -1873,6 +1930,18 @@ input[type="file"]::file-selector-button:hover {
         background: rgba(99, 102, 241, 0.08) !important;
         color: var(--primary-dark) !important;
     }
+    .pbi-options-table { background: #ffffff !important; }
+    .pbi-options-table th {
+        background: rgba(99, 102, 241, 0.06) !important;
+        color: var(--text-1) !important;
+    }
+    .pbi-options-table .pbi-opt-bad { background: rgba(239, 68, 68, 0.04) !important; }
+    .pbi-options-table .pbi-opt-good { background: rgba(16, 185, 129, 0.04) !important; }
+    .pbi-options-table code {
+        background: rgba(15, 23, 42, 0.05) !important;
+        color: var(--text-1) !important;
+    }
+    .pbi-not { color: var(--danger) !important; }
 }
 
 /* ============================================================

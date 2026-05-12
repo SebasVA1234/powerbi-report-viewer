@@ -692,9 +692,16 @@
                         <div class="step">
                             <div class="step-num">2</div>
                             <div class="step-body">
-                                <div class="step-title">Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></div>
+                                <div class="step-title">Menú <strong>Archivo → Incrustar informe → "Publicar en la web (público)"</strong></div>
+                                <div class="note" style="background:rgba(239,68,68,0.08); border-left:3px solid #ef4444; padding:0.55rem 0.7rem; margin-bottom:0.4rem;">
+                                    🚨 <strong>OJO: NO uses "Sitio web o portal".</strong> Power BI tiene dos menús parecidos en el mismo lugar — solo uno sirve para el portal:
+                                    <ul style="margin: 0.35rem 0 0 1rem; font-size: 0.82rem; line-height: 1.5;">
+                                        <li>❌ <strong>Sitio web o portal</strong> → URL <span class="kbd">.../reportEmbed?reportId=...</span> → pide Sign-in a cada usuario y queda bloqueado dentro del iframe.</li>
+                                        <li>✅ <strong>Publicar en la web (público)</strong> → URL <span class="kbd">.../view?r=...</span> → carga directo sin login.</li>
+                                    </ul>
+                                </div>
                                 <div class="step-detail">Microsoft te muestra una advertencia sobre que el reporte será accesible públicamente con un link. Confirmá.</div>
-                                <div class="note">⚠️ <strong>Importante:</strong> esta opción la habilita el admin de M365 a nivel de tenant. Si no aparece, pedí a tu administrador de Microsoft que la active en Power BI Admin Portal → Tenant settings → "Publish to web".</div>
+                                <div class="note">⚠️ <strong>Si "Publicar en la web" no aparece en el menú</strong>, está deshabilitado a nivel de tenant. Pedile al admin de M365 que la active en Power BI Admin Portal → Tenant settings → "Publish to web".</div>
                             </div>
                         </div>
                         <div class="step">
