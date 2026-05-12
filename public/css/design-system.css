@@ -1789,6 +1789,93 @@ input[type="file"]::file-selector-button:hover {
 .rubro-inline-form select { width: 120px; }
 
 /* ============================================================
+   PR-6 · Ayuda + validación en URL de Power BI (Publish to Web)
+   ============================================================ */
+.pbi-url-help {
+    margin-top: 0.5rem;
+    font-size: 0.82rem;
+}
+.pbi-url-help details {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+}
+.pbi-url-help summary {
+    cursor: pointer;
+    color: var(--primary-light);
+    font-weight: 600;
+    user-select: none;
+    list-style: none;
+}
+.pbi-url-help summary::-webkit-details-marker { display: none; }
+.pbi-url-help summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 0.4rem;
+    transition: transform var(--transition-fast);
+}
+.pbi-url-help details[open] summary::before { transform: rotate(90deg); }
+.pbi-url-help ol {
+    margin: 0.6rem 0 0.4rem 1.25rem;
+    padding: 0;
+    color: var(--text-2);
+    line-height: 1.55;
+}
+.pbi-url-help ol li { margin-bottom: 0.25rem; }
+.pbi-url-help code {
+    background: rgba(99, 102, 241, 0.10);
+    color: var(--primary-light);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+}
+.pbi-url-help .pbi-url-warn {
+    margin: 0.5rem 0 0 0;
+    padding: 0.5rem 0.6rem;
+    background: rgba(245, 158, 11, 0.10);
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    color: #fcd34d;
+    font-size: 0.78rem;
+}
+.pbi-url-warning {
+    margin-top: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    background: rgba(239, 68, 68, 0.10);
+    border: 1px solid rgba(239, 68, 68, 0.30);
+    border-radius: var(--radius-md);
+    color: #fca5a5;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+.pbi-url-warning code {
+    background: rgba(239, 68, 68, 0.15);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+}
+.pbi-url-input.pbi-url-bad {
+    border-color: rgba(239, 68, 68, 0.55) !important;
+}
+
+@media (prefers-color-scheme: light) {
+    .pbi-url-help .pbi-url-warn {
+        color: #92400e !important;
+        background: rgba(245, 158, 11, 0.08) !important;
+    }
+    .pbi-url-warning {
+        background: rgba(239, 68, 68, 0.06) !important;
+        color: #b91c1c !important;
+    }
+    .pbi-url-help summary { color: var(--primary-dark) !important; }
+    .pbi-url-help code {
+        background: rgba(99, 102, 241, 0.08) !important;
+        color: var(--primary-dark) !important;
+    }
+}
+
+/* ============================================================
    PR-3b · Toolbar de filtros y headers ordenables en Admin > Usuarios
    ============================================================ */
 .users-toolbar {

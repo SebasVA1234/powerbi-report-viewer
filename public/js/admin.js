@@ -926,3 +926,40 @@ async function saveMaxWindows() {
 // Export settings functions
 window.loadSettings = loadSettings;
 window.saveMaxWindows = saveMaxWindows;
+
+// PR-6: validación de URL de Power BI. Detecta cuando el admin pega una URL
+// que NO es de "Publicar en la Web" (la única que se puede embeber sin auth
+// dentro del iframe del portal). Muestra un warning rojo pero no bloquea el
+// guardado — el admin puede aceptar bajo su responsabilidad si sabe lo que
+// hace (por ejemplo si en el futuro migramos a App Owns Data).
+//
+// Patrón válido de "Publish to Web":
+//   https://app.powerbi.com/view?r=eyJrIjoi...        (tenant default)
+//   https://app.powerbi.com/view?r=<token>            (con o sin params)
+//
+// Patrones que dan warning (URLs que requieren auth):
+//   https://app.powerbi.com/reportEmbed?reportId=...
+//   https://app.powerbi.com/groups/...
+//   https://msit.powerbi.com/...
+function isPublishToWebUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    // Permitimos app.powerbi.com/view?r=  y  app.fabric.microsoft.com/view?r=
+    return /^https:\/\/(app\.powerbi\.com|app\.fabric\.microsoft\.com)\/view\?r=/i.test(url.trim());
+}
+
+document.addEventListener('input', (e) => {
+    if (!e.target.matches || !e.target.matches('.pbi-url-input')) return;
+    const input = e.target;
+    const url = input.value.trim();
+    const warningEl = input.closest('.form-group')?.querySelector('[data-pbi-warning]');
+    if (!warningEl) return;
+    // Solo validar cuando hay texto que se parece a URL (evitar warning vacío)
+    if (url.length === 0 || url.length < 30) {
+        warningEl.style.display = 'none';
+        input.classList.remove('pbi-url-bad');
+        return;
+    }
+    const isOk = isPublishToWebUrl(url);
+    warningEl.style.display = isOk ? 'none' : 'block';
+    input.classList.toggle('pbi-url-bad', !isOk);
+});

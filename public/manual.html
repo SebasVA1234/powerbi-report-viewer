@@ -676,6 +676,68 @@
                     </div>
                 </div>
 
+                <div class="action-card" data-action="agregar-reporte-powerbi">
+                    <div class="card-icon">📊</div>
+                    <div class="card-title">Agregar un reporte de Power BI al portal</div>
+                    <div class="card-desc">Publicar el reporte como "Publish to Web" y pegar la URL en el portal — sin que los usuarios tengan que loguearse a Microsoft.</div>
+                    <span class="card-cta">Ver pasos</span>
+                    <div class="step-list">
+                        <div class="step">
+                            <div class="step-num">1</div>
+                            <div class="step-body">
+                                <div class="step-title">En <strong>app.powerbi.com</strong>: abrí el reporte que querés agregar</div>
+                                <div class="step-detail">Entrá al workspace donde está el .pbix publicado y abrí el reporte en modo lectura.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">2</div>
+                            <div class="step-body">
+                                <div class="step-title">Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></div>
+                                <div class="step-detail">Microsoft te muestra una advertencia sobre que el reporte será accesible públicamente con un link. Confirmá.</div>
+                                <div class="note">⚠️ <strong>Importante:</strong> esta opción la habilita el admin de M365 a nivel de tenant. Si no aparece, pedí a tu administrador de Microsoft que la active en Power BI Admin Portal → Tenant settings → "Publish to web".</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">3</div>
+                            <div class="step-body">
+                                <div class="step-title">Copiá la <strong>URL de iframe</strong></div>
+                                <div class="mini-ui">
+URL: https://app.powerbi.com/view?r=eyJrIjoiM2YxN2Y2... ← ESTA
+HTML: &lt;iframe src="..." width="800"...&gt;
+                                </div>
+                                <div class="step-detail">Microsoft te da dos cosas: una URL y un código HTML. Necesitamos la URL (la que empieza con <span class="kbd">https://app.powerbi.com/view?r=</span>).</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">4</div>
+                            <div class="step-body">
+                                <div class="step-title">En el portal: <strong>Administración → Reportes → + Nuevo Reporte</strong></div>
+                                <div class="step-detail">Llená Nombre, Descripción, Categoría y pegá la URL en el campo <span class="kbd">URL de Power BI</span>. Click "Crear Reporte".</div>
+                                <div class="note">El portal valida el formato de la URL: si pegás una que requiere login (como <span class="kbd">app.powerbi.com/reportEmbed?reportId=</span>), aparece un aviso rojo — ese formato deja el iframe en blanco para los usuarios.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">5</div>
+                            <div class="step-body">
+                                <div class="step-title">Asignalo a quien lo necesita (siguiente paso)</div>
+                                <div class="step-detail">Click el ícono <span class="pill success">verde</span> de Accesos en la fila del reporte y elegí usuarios / departamentos / roles. Ver la card de "Asignar un reporte a alguien" para detalles.</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-num">6</div>
+                            <div class="step-body">
+                                <div class="step-title">🔒 Sobre la seguridad de la URL</div>
+                                <div class="step-detail">La URL de Publish to Web es <strong>como una contraseña</strong>: cualquiera que la conozca puede ver el reporte sin loguearse. Por eso:</div>
+                                <ul style="margin: 0.4rem 0 0 1rem; color: var(--text-2); font-size: 0.85rem; line-height: 1.55;">
+                                    <li>La URL va <strong>solo</strong> en la DB del portal — nunca la pegues en emails, Slack ni docs compartidos.</li>
+                                    <li>Para "des-publicar" un reporte: en Power BI Service → tu workspace → menú "..." del reporte → <strong>Administrar incrustar códigos</strong> → Eliminar. La URL queda inválida.</li>
+                                    <li>Si sospechás que la URL se filtró, re-publicá el reporte: te da una URL nueva y la vieja deja de funcionar.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="action-card" data-action="asignar-reporte">
                     <div class="card-icon">🎯</div>
                     <div class="card-title">Asignar un reporte a alguien</div>

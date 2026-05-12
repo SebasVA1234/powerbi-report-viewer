@@ -1431,7 +1431,23 @@
                         </div>
                         <div class="form-group">
                             <label>URL de Power BI</label>
-                            <input type="url" name="embed_url" required placeholder="https://app.powerbi.com/view?r=...">
+                            <input type="url" name="embed_url" class="pbi-url-input" required placeholder="https://app.powerbi.com/view?r=...">
+                            <div class="pbi-url-help">
+                                <details>
+                                    <summary>¿De dónde saco esta URL?</summary>
+                                    <ol>
+                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte que querés agregar</li>
+                                        <li>Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></li>
+                                        <li>Microsoft te muestra una advertencia → confirmá</li>
+                                        <li>Copiá la <strong>URL de iframe</strong> (la que empieza con <code>https://app.powerbi.com/view?r=</code>)</li>
+                                        <li>Pegala en este campo</li>
+                                    </ol>
+                                    <p class="pbi-url-warn">⚠️ La URL es <strong>como una contraseña</strong>: cualquiera que la conozca puede ver el reporte. Compartila solo dentro del portal.</p>
+                                </details>
+                            </div>
+                            <div class="pbi-url-warning" data-pbi-warning style="display:none;">
+                                ⚠️ Esta URL no parece ser de <strong>Publicar en la Web</strong>. Las URLs que requieren login de Microsoft (como <code>app.powerbi.com/reportEmbed?reportId=...</code>) no se cargan correctamente en el portal — el reporte aparecerá en blanco. Usá la URL de "Publicar en la Web (público)".
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Categoría</label>
@@ -1466,7 +1482,23 @@
                         </div>
                         <div class="form-group">
                             <label>URL de Power BI</label>
-                            <input type="url" name="embed_url" id="edit-report-url" required>
+                            <input type="url" name="embed_url" id="edit-report-url" class="pbi-url-input" required>
+                            <div class="pbi-url-help">
+                                <details>
+                                    <summary>¿De dónde saco esta URL?</summary>
+                                    <ol>
+                                        <li>Abrí <strong>app.powerbi.com</strong> y entrá al reporte que querés agregar</li>
+                                        <li>Menú <strong>Archivo → Incrustar informe → Publicar en la Web (público)</strong></li>
+                                        <li>Microsoft te muestra una advertencia → confirmá</li>
+                                        <li>Copiá la <strong>URL de iframe</strong> (la que empieza con <code>https://app.powerbi.com/view?r=</code>)</li>
+                                        <li>Pegala en este campo</li>
+                                    </ol>
+                                    <p class="pbi-url-warn">⚠️ La URL es <strong>como una contraseña</strong>: cualquiera que la conozca puede ver el reporte. Compartila solo dentro del portal.</p>
+                                </details>
+                            </div>
+                            <div class="pbi-url-warning" data-pbi-warning style="display:none;">
+                                ⚠️ Esta URL no parece ser de <strong>Publicar en la Web</strong>. Las URLs que requieren login de Microsoft (como <code>app.powerbi.com/reportEmbed?reportId=...</code>) no se cargan correctamente en el portal — el reporte aparecerá en blanco. Usá la URL de "Publicar en la Web (público)".
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Categoría</label>
