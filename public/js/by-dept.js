@@ -159,22 +159,197 @@
         `;
     }
 
-    // Stubs para los modales de PR-8b/c/d — por ahora muestran un toast
-    // anunciando que están en construcción para que el admin sepa que el
-    // botón funciona pero la feature concreta llega en siguiente sub-PR.
-    function openReports(deptId, deptName) {
-        if (typeof Notification !== 'undefined' && Notification.info) {
-            Notification.info(`Asignación de reportes para "${deptName}" — modal en construcción (PR-8b). Por ahora podés asignar reportes individuales desde la tab Reportes › ícono verde de Accesos.`);
+    // PR-8b: modal "Gestionar Reportes" del departamento.
+    // Abre un modal con lista de reportes del sistema y checkboxes
+    // indicando cuáles están asignados al depto via resource_acl.
+    async function openReports(deptId, deptName) {
+        const modal = ensureResourceModal('reports', deptId, deptName);
+        const list = modal.querySelector('.dept-resource-list');
+        list.innerHTML = '<div class="loading" style="padding:1rem; text-align:center; color:var(--text-3);">Cargando reportes…</div>';
+        modal.classList.add('active');
+
+        try {
+            const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+            const [reportsR, aclsR] = await Promise.all([
+                fetch('/api/reports', { headers }).then(r => r.json()),
+                fetch(`/api/rbac/acl/principal/department/${deptId}`, { headers }).then(r => r.json())
+            ]);
+            const reports = (reportsR.data && reportsR.data.reports) || reportsR.data || [];
+            const acls = (aclsR.data && aclsR.data.acls) || aclsR.data || [];
+            // Set de resource_id de reportes ya asignados al depto
+            const assignedReportIds = new Set(
+                acls.filter(a => a.resource_type === 'report').map(a => Number(a.resource_id))
+            );
+            modal.dataset.initialAssigned = JSON.stringify(Array.from(assignedReportIds));
+
+            if (reports.length === 0) {
+                list.innerHTML = '<div class="empty" style="padding:1rem; text-align:center; color:var(--text-3); font-style:italic;">No hay reportes creados todavía. Andá a Administración › Reportes para crear uno.</div>';
+                return;
+            }
+            list.innerHTML = reports.map(r => {
+                const checked = assignedReportIds.has(Number(r.id)) ? 'checked' : '';
+                return `
+                    <label class="dept-resource-row">
+                        <input type="checkbox" data-resource-id="${r.id}" ${checked}>
+                        <div class="dept-resource-info">
+                            <div class="dept-resource-name">${escapeHtml(r.name)}</div>
+                            ${r.category ? `<div class="dept-resource-meta">${escapeHtml(r.category)}</div>` : ''}
+                        </div>
+                    </label>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('openReports error:', err);
+            list.innerHTML = `<div class="error" style="padding:1rem; text-align:center; color:var(--danger);">Error al cargar reportes</div>`;
         }
     }
-    function openDocs(deptId, deptName) {
-        if (typeof Notification !== 'undefined' && Notification.info) {
-            Notification.info(`Asignación de documentos para "${deptName}" — modal en construcción (PR-8c).`);
+
+    // PR-8c: modal "Gestionar Documentos" del departamento. Mismo patrón
+    // que openReports, pero pide /api/documents y filtra por resource_type
+    // ='document' al leer las ACLs.
+    async function openDocs(deptId, deptName) {
+        const modal = ensureResourceModal('docs', deptId, deptName);
+        const list = modal.querySelector('.dept-resource-list');
+        list.innerHTML = '<div class="loading" style="padding:1rem; text-align:center; color:var(--text-3);">Cargando documentos…</div>';
+        modal.classList.add('active');
+
+        try {
+            const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+            const [docsR, aclsR] = await Promise.all([
+                fetch('/api/documents', { headers }).then(r => r.json()),
+                fetch(`/api/rbac/acl/principal/department/${deptId}`, { headers }).then(r => r.json())
+            ]);
+            const docs = (docsR.data && docsR.data.documents) || docsR.data || [];
+            const acls = (aclsR.data && aclsR.data.acls) || aclsR.data || [];
+            const assignedDocIds = new Set(
+                acls.filter(a => a.resource_type === 'document').map(a => Number(a.resource_id))
+            );
+            modal.dataset.initialAssigned = JSON.stringify(Array.from(assignedDocIds));
+
+            if (docs.length === 0) {
+                list.innerHTML = '<div class="empty" style="padding:1rem; text-align:center; color:var(--text-3); font-style:italic;">No hay documentos cargados todavía. Andá a Administración › Documentos para subir uno.</div>';
+                return;
+            }
+            list.innerHTML = docs.map(d => {
+                const checked = assignedDocIds.has(Number(d.id)) ? 'checked' : '';
+                return `
+                    <label class="dept-resource-row">
+                        <input type="checkbox" data-resource-id="${d.id}" ${checked}>
+                        <div class="dept-resource-info">
+                            <div class="dept-resource-name">${escapeHtml(d.name || d.filename || 'Sin nombre')}</div>
+                            ${d.category ? `<div class="dept-resource-meta">${escapeHtml(d.category)}</div>` : ''}
+                        </div>
+                    </label>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('openDocs error:', err);
+            list.innerHTML = `<div class="error" style="padding:1rem; text-align:center; color:var(--danger);">Error al cargar documentos</div>`;
         }
     }
     function openModules(deptId, deptName) {
         if (typeof Notification !== 'undefined' && Notification.info) {
             Notification.info(`Switches de módulos (Cotizador, RRHH, etc) para "${deptName}" — modal en construcción (PR-8d).`);
+        }
+    }
+
+    // Modal genérico (reutilizado por reports/docs) — se crea una sola vez y
+    // se rellena dinámicamente según el resource type.
+    function ensureResourceModal(resourceType, deptId, deptName) {
+        const titleFor = (rt, name) =>
+            (rt === 'reports' ? 'Reportes' : 'Documentos') + ' asignados a ' + name;
+        let modal = document.getElementById('dept-resource-modal');
+        if (modal) {
+            modal.querySelector('.dept-resource-title').textContent = titleFor(resourceType, deptName);
+            modal.dataset.deptId = deptId;
+            modal.dataset.deptName = deptName;
+            modal.dataset.resourceType = resourceType;
+            return modal;
+        }
+        modal = document.createElement('div');
+        modal.id = 'dept-resource-modal';
+        modal.className = 'modal';
+        modal.dataset.deptId = deptId;
+        modal.dataset.deptName = deptName;
+        modal.dataset.resourceType = resourceType;
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 640px;">
+                <div class="modal-header">
+                    <h3 class="dept-resource-title">${escapeHtml(titleFor(resourceType, deptName))}</h3>
+                    <button class="btn-close" onclick="document.getElementById('dept-resource-modal').classList.remove('active')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem; color:var(--text-3); margin: 0 0 0.85rem 0;">
+                        Marcá los recursos que el departamento <strong>"${escapeHtml(deptName)}"</strong> debe ver. Todos los miembros del depto los verán automáticamente.
+                    </p>
+                    <div class="dept-resource-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="document.getElementById('dept-resource-modal').classList.remove('active')">Cancelar</button>
+                    <button type="button" class="btn btn-primary" onclick="byDept.saveResource()">Guardar cambios</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    async function saveResource() {
+        const modal = document.getElementById('dept-resource-modal');
+        if (!modal) return;
+        const deptId = Number(modal.dataset.deptId);
+        const deptName = modal.dataset.deptName;
+        // resourceType del modal es 'reports' o 'docs' (plural ui-friendly);
+        // la tabla resource_acl usa 'report' o 'document' (singular).
+        const resourceType = modal.dataset.resourceType === 'reports' ? 'report' : 'document';
+        const initialAssigned = new Set(JSON.parse(modal.dataset.initialAssigned || '[]').map(Number));
+        const currentChecked = new Set(
+            Array.from(modal.querySelectorAll('input[type="checkbox"]:checked'))
+                .map(cb => Number(cb.dataset.resourceId))
+        );
+        // Diff: agregar las nuevas, quitar las que se desmarcaron
+        const toAdd = [...currentChecked].filter(id => !initialAssigned.has(id));
+        const toRemove = [...initialAssigned].filter(id => !currentChecked.has(id));
+
+        if (toAdd.length === 0 && toRemove.length === 0) {
+            Notification.info('No hay cambios para guardar');
+            return;
+        }
+        const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+        const ops = [];
+        // 1. Crear las nuevas ACLs
+        for (const resourceId of toAdd) {
+            ops.push(fetch('/api/rbac/acl', {
+                method: 'POST', headers,
+                body: JSON.stringify({
+                    resource_type: resourceType, resource_id: resourceId,
+                    principal_type: 'department', principal_id: deptId,
+                    actions: ['view']
+                })
+            }).then(r => r.json()));
+        }
+        // 2. Para quitar, primero hay que encontrar el ACL id — re-fetcheamos
+        // las ACLs del depto y filtramos por las que vamos a quitar.
+        if (toRemove.length > 0) {
+            const r = await fetch(`/api/rbac/acl/principal/department/${deptId}`, { headers });
+            const j = await r.json();
+            const acls = (j.data && j.data.acls) || j.data || [];
+            const toDelete = acls.filter(a =>
+                a.resource_type === resourceType &&
+                toRemove.includes(Number(a.resource_id))
+            );
+            for (const acl of toDelete) {
+                ops.push(fetch(`/api/rbac/acl/${acl.id}`, { method: 'DELETE', headers }).then(r => r.json()));
+            }
+        }
+        try {
+            await Promise.all(ops);
+            const summary = `${toAdd.length} agregado(s) · ${toRemove.length} quitado(s) en "${deptName}"`;
+            Notification.success(summary);
+            modal.classList.remove('active');
+        } catch (err) {
+            console.error('saveResource error:', err);
+            Notification.error('Error al guardar cambios');
         }
     }
 
@@ -191,5 +366,5 @@
     document.addEventListener('user-permissions-saved', () => reload());
 
     // Expose globals
-    window.byDept = { reload, openReports, openDocs, openModules };
+    window.byDept = { reload, openReports, openDocs, openModules, saveResource };
 })();

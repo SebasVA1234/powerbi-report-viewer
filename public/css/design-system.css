@@ -2120,6 +2120,69 @@ input[type="file"]::file-selector-button:hover {
     padding: 0.85rem;
 }
 
+/* PR-8b: modal de "Gestionar Reportes/Documentos" del departamento */
+.dept-resource-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 420px;
+    overflow-y: auto;
+    padding: 0.25rem;
+}
+.dept-resource-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.dept-resource-row:hover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.08);
+}
+.dept-resource-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.dept-resource-row input[type="checkbox"]:checked + .dept-resource-info .dept-resource-name {
+    color: var(--primary-light);
+}
+.dept-resource-info {
+    flex: 1;
+    min-width: 0;
+}
+.dept-resource-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-1);
+}
+.dept-resource-meta {
+    font-size: 0.72rem;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+@media (prefers-color-scheme: light) {
+    .dept-resource-row {
+        background: rgba(15, 23, 42, 0.03) !important;
+    }
+    .dept-resource-row:hover {
+        background: rgba(99, 102, 241, 0.06) !important;
+    }
+    .dept-resource-row input[type="checkbox"]:checked + .dept-resource-info .dept-resource-name {
+        color: var(--primary-dark) !important;
+    }
+}
+
 @media (prefers-color-scheme: light) {
     .by-dept-card { background: #ffffff !important; }
     .by-dept-card-orphan {
