@@ -27,14 +27,18 @@ class UserController {
             // con password (nueva) o sin password (genera una temporal y
             // la devuelve UNA sola vez).
             // PR-3b: incluir departamentos agregados como string para mostrar
-            // en la nueva columna de Admin. GROUP_CONCAT funciona en sqlite y
-            // postgres usa STRING_AGG con casting; aquí usamos el subselect
-            // correlacionado que es compatible con ambos sin condicionar driver.
+            // en la nueva columna de Admin. SQLite usa GROUP_CONCAT, Postgres
+            // usa STRING_AGG — son funciones distintas con misma semántica.
+            // Mi versión anterior usaba GROUP_CONCAT siempre, que rompía en
+            // producción (Postgres) con "function group_concat does not exist".
+            const aggFn = db.driver === 'sqlite'
+                ? "GROUP_CONCAT(d.name, ', ')"
+                : "STRING_AGG(d.name, ', ')";
             let baseQuery = `
                 SELECT u.id, u.username, u.email, u.full_name, u.role, u.is_active,
                        u.must_change_password, u.created_at, u.updated_at,
                        COALESCE((
-                           SELECT GROUP_CONCAT(d.name, ', ')
+                           SELECT ${aggFn}
                            FROM user_departments ud
                            JOIN departments d ON d.id = ud.department_id
                            WHERE ud.user_id = u.id
