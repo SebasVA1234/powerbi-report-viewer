@@ -107,11 +107,7 @@ class WindowManager {
             </div>
             <div class="window-body">
                 <div class="window-loading"><div class="loading-spinner"></div><span>Cargando reporte...</span></div>
-                <iframe class="window-iframe"
-                        src="${embedUrl}"
-                        allowfullscreen="true"
-                        allow="fullscreen; clipboard-read; clipboard-write"
-                        referrerpolicy="strict-origin-when-cross-origin"></iframe>
+                <iframe class="window-iframe" src="${embedUrl}" allowfullscreen="true"></iframe>
             </div>
             <div class="window-resize-handle" data-window-id="${windowId}"></div>
         `;
