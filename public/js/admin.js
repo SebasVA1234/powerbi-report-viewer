@@ -83,15 +83,30 @@ function adminGoTo(tab) {
 }
 
 /**
- * applyAdminBars() — muestra u oculta las barras admin en Reportes y Documentos
- * según si el usuario tiene role=admin. Llamar después del login.
+ * applyAdminBars() — muestra u oculta las barras de administración
+ * en Reportes y Documentos.
+ *
+ * Visible para:
+ *  - Administradores (system.admin / legacy role=admin)
+ *  - Usuarios a quienes el admin haya otorgado 'categories.manage'
+ *    vía el sistema de permission overrides (Por Departamento → Módulos).
+ *
+ * Llamar después de que se haya cargado el contexto RBAC (post-login).
  */
 function applyAdminBars() {
-    const isAdmin = Auth.isAdmin();
+    // userHasAnyPermission() ya contempla window.__userIsAdmin (admins tienen todo)
+    const canManageReports = typeof userHasAnyPermission === 'function'
+        ? userHasAnyPermission('system.admin,categories.manage')
+        : Auth.isAdmin();
+
+    const canManageDocs = typeof userHasAnyPermission === 'function'
+        ? userHasAnyPermission('system.admin,categories.manage')
+        : Auth.isAdmin();
+
     const reportsBar = document.getElementById('admin-reports-bar');
     const docsBar    = document.getElementById('admin-docs-bar');
-    if (reportsBar) reportsBar.style.display = isAdmin ? 'flex' : 'none';
-    if (docsBar)    docsBar.style.display    = isAdmin ? 'flex' : 'none';
+    if (reportsBar) reportsBar.style.display = canManageReports ? 'flex' : 'none';
+    if (docsBar)    docsBar.style.display    = canManageDocs    ? 'flex' : 'none';
 }
 
 // Load Users
