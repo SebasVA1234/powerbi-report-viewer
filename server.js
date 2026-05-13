@@ -129,7 +129,7 @@ const limiter = rateLimit({
 // RATE_LIMIT_LOGIN_MAX puede subirse temporalmente para pruebas masivas
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: parseInt(process.env.RATE_LIMIT_LOGIN_MAX) || 5,
+    max: parseInt(process.env.RATE_LIMIT_LOGIN_MAX) || 100, // TEMP: bajado a 5 después del testing
     message: {
         success: false,
         message: 'Demasiados intentos de login, intente en 15 minutos'
