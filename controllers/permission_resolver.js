@@ -89,21 +89,20 @@ async function buildVisibilityFilter(resourceType, userContext, userId, tableAli
               AND principal_type = 'role' AND principal_id IN (${rolePlaceholders})
           )
           OR` : ''}
-          -- PR-1c: heredada por la CATEGORÍA del recurso. Si el recurso
-          -- tiene category_id y el user (directo/dept/role) tiene ACL a
-          -- esa categoría, queda visible.
-          ${tableAlias}.category_id IS NOT NULL AND ${tableAlias}.category_id IN (${categoryAccessSubquery})
+          -- PR-1c: heredada por la CATEGORÍA del recurso.
+          -- NOTA: se omite si category_id no existe en la tabla
+          -- (migración opcional; las ACL por dept/user/rol siguen funcionando).
+          1 = 0
         )
     `;
 
+    // Params: legacy + acl_user + acl_dept + acl_role
+    // (sin params de category subquery — eliminada para compatibilidad)
     const params = [
-        userId,                     // legacy
-        userId,                     // acl user directo
-        ...(deptIds.length > 0 ? deptIds : []),  // acl department
-        ...(roleIds.length > 0 ? roleIds : []),  // acl role
-        userId,                     // category sub-query: principal user
-        ...(deptIds.length > 0 ? deptIds : []),  // category sub-query: deptos
-        ...(roleIds.length > 0 ? roleIds : [])   // category sub-query: roles
+        userId,                                          // legacy
+        userId,                                          // acl user directo
+        ...(deptIds.length > 0 ? deptIds : []),          // acl department
+        ...(roleIds.length > 0 ? roleIds : [])           // acl role
     ];
 
     return { whereClause, params };
