@@ -396,5 +396,8 @@ async function updateUserDisplay() {
         // Cargar contexto RBAC y aplicar gating a [data-permission].
         await loadUserPermsContext();
         applyPermissionGating();
+
+        // Mostrar barras admin en Reportes y Documentos si corresponde.
+        if (typeof applyAdminBars === 'function') applyAdminBars();
     }
 }

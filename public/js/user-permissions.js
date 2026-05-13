@@ -120,11 +120,12 @@
                 : `<span class="role-pill role-none">Sin departamento</span>`;
             pillsContainer.innerHTML = rolePills + deptPills;
 
-            // ---- Aviso de admin bloqueado ----
+            // ---- Aviso de admin — sólo departamentos permitidos ----
             if (isAdmin) {
                 document.getElementById('user-perm-admin-notice').style.display = 'block';
-                document.getElementById('user-perm-save-btn').disabled = true;
-                document.getElementById('user-perm-save-btn').classList.add('btn-locked');
+                // Save button enabled: puede guardar asignación de departamento
+                document.getElementById('user-perm-save-btn').disabled = false;
+                document.getElementById('user-perm-save-btn').classList.remove('btn-locked');
             } else {
                 document.getElementById('user-perm-admin-notice').style.display = 'none';
                 document.getElementById('user-perm-save-btn').disabled = false;
@@ -185,10 +186,11 @@
 
             container.innerHTML = this.catalogDepts.map(d => {
                 const checked = userDeptIds.has(Number(d.id)) ? 'checked' : '';
-                const disabled = isAdmin ? 'disabled' : '';
+                // Dept checkboxes siempre editables — incluso para admins.
+                // Lo que no se puede cambiar en admins es el rol y datos básicos.
                 return `
                     <label class="dept-check">
-                        <input type="checkbox" value="${d.id}" data-dept-code="${escapeHtml(d.code)}" ${checked} ${disabled}>
+                        <input type="checkbox" value="${d.id}" data-dept-code="${escapeHtml(d.code)}" ${checked}>
                         <span>${escapeHtml(d.name || d.code)}</span>
                     </label>
                 `;
@@ -323,11 +325,7 @@
         },
 
         async save() {
-            if (document.getElementById('user-perm-is-admin').value === '1') {
-                Notification.error('No podés modificar permisos de un Administrador');
-                return;
-            }
-
+            const isAdminUser = document.getElementById('user-perm-is-admin').value === '1';
             const userId = this.currentUserId;
             const newRole = document.getElementById('user-perm-role').value;
             const selectedDepts = Array.from(document.querySelectorAll('#user-perm-depts input[type=checkbox]:checked'))
@@ -336,7 +334,7 @@
             const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
             const operations = [];
 
-            // PR-4: Datos básicos (PUT /api/users/:id) — solo si cambió algo
+            // PR-4: Datos básicos (PUT /api/users/:id) — solo si cambió algo y no es admin
             const orig = this.currentContext.user;
             const newFullName = document.getElementById('user-perm-fullname').value.trim();
             const newUsername = document.getElementById('user-perm-username').value.trim();
@@ -344,7 +342,7 @@
             const basicChanged = newFullName !== (orig.full_name || '') ||
                                  newUsername !== (orig.username || '') ||
                                  newEmail    !== (orig.email || '');
-            if (basicChanged) {
+            if (basicChanged && !isAdminUser) {
                 operations.push({
                     label: 'Actualizar datos básicos',
                     run: () => fetch(`/api/users/${userId}`, {
@@ -387,8 +385,8 @@
                 });
             }
 
-            // Diff de rol: quitar el viejo si cambió, agregar el nuevo
-            if (newRole !== this.originalRole) {
+            // Diff de rol: quitar el viejo si cambió, agregar el nuevo (no para admins)
+            if (!isAdminUser && newRole !== this.originalRole) {
                 if (this.originalRole) {
                     operations.push({
                         label: `Quitar rol ${this.originalRole}`,

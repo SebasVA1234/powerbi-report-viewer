@@ -44,8 +44,15 @@ function setupAdminTabs() {
                     case 'documents':
                         if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
                         break;
-                    case 'settings': loadSettings(); break;
-                    // PR-1d: tabs nuevos
+                    case 'settings':
+                        loadSettings();
+                        // Settings tab ahora incluye Departamentos + Categorías
+                        if (typeof rbacAdmin !== 'undefined') {
+                            rbacAdmin.loadDepartments();
+                            rbacAdmin.loadCategories();
+                        }
+                        break;
+                    // PR-1d: tabs individuales (ocultos en nav, accesibles por adminGoTo())
                     case 'departments':
                         if (typeof rbacAdmin !== 'undefined') rbacAdmin.loadDepartments();
                         break;
@@ -59,6 +66,32 @@ function setupAdminTabs() {
             }
         });
     });
+}
+
+/**
+ * adminGoTo(tab) — navega al admin section y activa una tab concreta.
+ * Usada desde las barras inline de Reportes y Documentos para acceder
+ * a la gestión completa desde esas secciones.
+ */
+function adminGoTo(tab) {
+    showSection('admin');
+    // Esperar a que la sección esté visible antes de hacer click
+    setTimeout(() => {
+        const btn = document.querySelector(`#admin-section > .admin-tabs > [data-tab="${tab}"]`);
+        if (btn) btn.click();
+    }, 150);
+}
+
+/**
+ * applyAdminBars() — muestra u oculta las barras admin en Reportes y Documentos
+ * según si el usuario tiene role=admin. Llamar después del login.
+ */
+function applyAdminBars() {
+    const isAdmin = Auth.isAdmin();
+    const reportsBar = document.getElementById('admin-reports-bar');
+    const docsBar    = document.getElementById('admin-docs-bar');
+    if (reportsBar) reportsBar.style.display = isAdmin ? 'flex' : 'none';
+    if (docsBar)    docsBar.style.display    = isAdmin ? 'flex' : 'none';
 }
 
 // Load Users

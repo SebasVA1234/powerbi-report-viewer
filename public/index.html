@@ -194,6 +194,27 @@
                                 </div>
                             </div>
 
+                            <!-- Barra admin (solo visible para administradores) -->
+                            <div id="admin-reports-bar" class="admin-inline-bar" style="display:none;">
+                                <div class="admin-inline-bar-left">
+                                    <span class="admin-inline-bar-label">Administrar</span>
+                                </div>
+                                <div class="admin-inline-bar-actions">
+                                    <button class="btn btn-primary btn-sm" onclick="showCreateReportModal()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        Nuevo Reporte
+                                    </button>
+                                    <button class="btn btn-outline btn-sm" onclick="adminGoTo('reports')" title="Ver tabla completa de reportes con edición y eliminación">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                        Editar / Eliminar
+                                    </button>
+                                    <button class="btn btn-outline btn-sm" onclick="adminGoTo('categories')" title="Gestionar categorías de reportes">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 7h18M3 12h18M3 17h18"></path></svg>
+                                        Categorías
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- Reports List -->
                             <div class="reports-section-header">
                                 <h2>Reportes Disponibles</h2>
@@ -284,6 +305,24 @@
                                     <span class="counter-label">documentos</span>
                                 </div>
                             </div>
+
+                            <!-- Barra admin (solo visible para administradores) -->
+                            <div id="admin-docs-bar" class="admin-inline-bar" style="display:none;">
+                                <div class="admin-inline-bar-left">
+                                    <span class="admin-inline-bar-label">Administrar</span>
+                                </div>
+                                <div class="admin-inline-bar-actions">
+                                    <button class="btn btn-primary btn-sm" onclick="showCreateDocumentModal()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        Subir Documento
+                                    </button>
+                                    <button class="btn btn-outline btn-sm" onclick="adminGoTo('documents')" title="Ver tabla completa con edición y eliminación">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                        Editar / Eliminar
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="reports-section-header">
                                 <h2>Mis Documentos</h2>
                                 <div class="reports-actions">
@@ -785,32 +824,12 @@
                                     </svg>
                                     Personal
                                 </button>
-                                <button class="tab-btn" data-tab="departments">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                        <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21V11M15 21V11"></path>
-                                    </svg>
-                                    Departamentos
-                                </button>
-                                <button class="tab-btn" data-tab="categories">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                        <path d="M3 7h18M3 12h18M3 17h18"></path>
-                                    </svg>
-                                    Categorías
-                                </button>
-                                <button class="tab-btn" data-tab="reports">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                        <polyline points="14 2 14 8 20 8"></polyline>
-                                    </svg>
-                                    Reportes
-                                </button>
-                                <button class="tab-btn" data-tab="documents">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                        <polyline points="14 2 14 8 20 8"></polyline>
-                                    </svg>
-                                    Documentos
-                                </button>
+                                <!-- Tabs Departamentos, Categorías, Reportes y Documentos
+                                     ocultos del menú — contenido movido a sus secciones respectivas -->
+                                <button class="tab-btn" data-tab="departments" style="display:none;">Departamentos</button>
+                                <button class="tab-btn" data-tab="categories"  style="display:none;">Categorías</button>
+                                <button class="tab-btn" data-tab="reports"     style="display:none;">Reportes (admin)</button>
+                                <button class="tab-btn" data-tab="documents"   style="display:none;">Docs (admin)</button>
                                 <!-- Tab "Permisos avanzados" oculto — centralizado en "Por Departamento" (PR-9) -->
                                 <button class="tab-btn" data-tab="rbac-permissions" style="display:none;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
@@ -954,36 +973,78 @@
                                 </div>
                             </div>
 
-                            <!-- Tab: Configuración -->
+                            <!-- Tab: Configuración (incluye Departamentos + Categorías) -->
                             <div id="settings-tab" class="tab-content">
                                 <div class="tab-header">
-                                    <h3>Configuración del Sistema</h3>
+                                    <h3>Configuración · Catálogos</h3>
                                 </div>
-                                <div class="settings-container">
-                                    <div class="settings-section">
-                                        <h4>Visualización de Reportes</h4>
-                                        <div class="setting-item">
-                                            <div class="setting-info">
-                                                <label for="max-windows">Máximo de ventanas abiertas</label>
-                                                <p class="setting-description">Cantidad máxima de reportes que un usuario puede tener abiertos simultáneamente (1-10)</p>
-                                            </div>
-                                            <div class="setting-control">
-                                                <input type="number" id="max-windows" min="1" max="10" value="5">
-                                                <button class="btn btn-primary btn-sm" onclick="saveMaxWindows()">Guardar</button>
-                                            </div>
-                                        </div>
+
+                                <!-- Sub-sección: Departamentos -->
+                                <div class="settings-section" style="margin-bottom:2rem;">
+                                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                                        <h4 style="margin:0;">Departamentos</h4>
+                                        <button class="btn btn-primary btn-sm" onclick="rbacAdmin.openCreateDepartment()">+ Nuevo Departamento</button>
                                     </div>
-                                    <div class="settings-section">
-                                        <h4>Información del Sistema</h4>
-                                        <div class="system-info">
-                                            <div class="info-item">
-                                                <span class="info-label">Versión:</span>
-                                                <span class="info-value">1.0.0</span>
-                                            </div>
-                                            <div class="info-item">
-                                                <span class="info-label">Base de datos:</span>
-                                                <span class="info-value">SQLite</span>
-                                            </div>
+                                    <div class="table-container">
+                                        <table class="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Código</th>
+                                                    <th>Nombre</th>
+                                                    <th>Miembros</th>
+                                                    <th>Estado</th>
+                                                    <th>Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="departments-tbody">
+                                                <tr><td colspan="5" class="loading">Cargando...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Sub-sección: Categorías -->
+                                <div class="settings-section" style="margin-bottom:2rem;">
+                                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                                        <h4 style="margin:0;">Categorías de Reportes y Documentos</h4>
+                                        <button class="btn btn-primary btn-sm" onclick="rbacAdmin.openCreateCategory()">+ Nueva Categoría</button>
+                                    </div>
+                                    <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem;">
+                                        <select id="settings-cat-type" onchange="rbacAdmin.loadCategories()" style="padding:0.4rem 0.75rem; border-radius:var(--radius-md); background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-1); font-size:0.85rem;">
+                                            <option value="">Todas</option>
+                                            <option value="report">Reportes</option>
+                                            <option value="document">Documentos</option>
+                                        </select>
+                                    </div>
+                                    <div class="table-container">
+                                        <table class="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Tipo</th>
+                                                    <th>Código</th>
+                                                    <th>Nombre</th>
+                                                    <th>Estado</th>
+                                                    <th>Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="categories-tbody">
+                                                <tr><td colspan="5" class="loading">Cargando...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Sub-sección: Configuración del sistema -->
+                                <div class="settings-section">
+                                    <h4>Sistema</h4>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <label for="max-windows">Máximo de ventanas abiertas</label>
+                                            <p class="setting-description">Cantidad máxima de reportes que un usuario puede tener abiertos simultáneamente (1-10)</p>
+                                        </div>
+                                        <div class="setting-control">
+                                            <input type="number" id="max-windows" min="1" max="10" value="5">
+                                            <button class="btn btn-primary btn-sm" onclick="saveMaxWindows()">Guardar</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1276,7 +1337,7 @@
                 <!-- Aviso si target es admin (oculto por default) -->
                 <div id="user-perm-admin-notice" style="display:none; margin: 0.75rem 1.5rem 0;">
                     <div class="admin-target-notice">
-                        Este usuario es Administrador. Por seguridad, no podés modificar sus permisos, contraseña ni eliminarlo.
+                        Este usuario es Administrador. Podés asignar o cambiar sus departamentos, pero no modificar rol, datos personales ni contraseña.
                     </div>
                 </div>
 

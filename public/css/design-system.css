@@ -2121,6 +2121,39 @@ input[type="file"]::file-selector-button:hover {
     padding: 0.85rem;
 }
 
+/* Admin inline bar — barra de administración que aparece en secciones
+   de Reportes y Documentos sólo cuando el usuario es admin. */
+.admin-inline-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 1rem;
+    background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(16,185,129,0.08) 100%);
+    border: 1px solid rgba(99,102,241,0.22);
+    border-radius: var(--radius-md);
+    margin-bottom: 1.25rem;
+}
+.admin-inline-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.admin-inline-bar-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--primary-light, #818cf8);
+    opacity: 0.9;
+}
+.admin-inline-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
 /* PR-8d: modal "Módulos del departamento" — matriz read-only de quién
    tiene acceso a qué módulo, con redirección al modal individual para
    modificar permisos. */
