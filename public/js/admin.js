@@ -15,6 +15,9 @@ async function initializeAdminSection() {
     await loadUsers();
     await loadAllReports();
     setupAdminForms();
+    // Recargar la grid "Por Departamento" cada vez que se abre Admin,
+    // porque en DOMContentLoaded aún no hay token y quedó vacía.
+    if (typeof byDept !== 'undefined') byDept.reload();
 }
 
 // Setup Admin Tabs

@@ -395,6 +395,7 @@ async function seedRbac() {
         'users.read', 'departments.manage',
         'reports.read.assigned', 'documents.read.assigned',
         'audit.read',
+        'hr.read.own',   // necesario para acceder al módulo RRHH en el sidebar
         'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage',
         'hr.holidays.manage', 'hr.attendance.manage',  // PR-3b
         'hr.timeoff.approve',                           // PR-3c
