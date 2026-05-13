@@ -2040,8 +2040,9 @@ input[type="file"]::file-selector-button:hover {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    max-height: 220px;
+    max-height: 250px;
     overflow-y: auto;
+    padding-bottom: 4px; /* evita que el último item se recorte */
 }
 .by-dept-person {
     display: flex;
