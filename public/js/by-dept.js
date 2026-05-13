@@ -247,15 +247,20 @@
             list.innerHTML = `<div class="error" style="padding:1rem; text-align:center; color:var(--danger);">Error al cargar documentos</div>`;
         }
     }
-    // PR-8d: modal "Módulos del depto". Lista los usuarios del depto y por
-    // cada uno muestra qué módulos puede usar (heredados de su rol RBAC).
-    // El admin ve un panorama claro y, si quiere cambiar permisos, click en
-    // "Editar" abre el modal individual que ya existe.
-    //
-    // NOTA: la asignación masiva de un permiso a todo el depto requiere la
-    // tabla user_permission_overrides (planeada en PR-2a, no implementada).
-    // Hasta tenerla, el flow es: el admin ve quién tiene qué, y cambia
-    // user-por-user via el botón Editar.
+    // PR-8d + PR-9: modal "Módulos del depto" — interactivo.
+    // Cada columna tiene 2 niveles:
+    //   - Cabecera = switch maestro (bulk: prende/apaga para todo el depto)
+    //   - Celda por user = toggle individual
+    // Módulos gestionables: Cotizador (cotizador.use), RRHH (hr.read.own).
+    // Reportes/Documentos son ✓ siempre y se gestionan con sus botones
+    // específicos del card.
+    const MODULES = [
+        { key: 'cot', label: '💲 Cotizador', perm: 'cotizador.use', toggleable: true },
+        { key: 'hr',  label: '👥 RRHH',      perm: 'hr.read.own',   toggleable: true }
+    ];
+    // Cache del último deptId + ctxs cargados (para refresh tras un toggle)
+    let _modulesModalState = { deptId: null, deptName: null, ctxs: [] };
+
     async function openModules(deptId, deptName) {
         let modal = document.getElementById('dept-modules-modal');
         if (!modal) {
@@ -274,15 +279,8 @@
                         </p>
                         <div class="dept-modules-table-wrap">
                             <table class="dept-modules-table">
-                                <thead>
-                                    <tr>
-                                        <th>Persona</th>
-                                        <th title="Sección Reportes">📊 Reportes</th>
-                                        <th title="Sección Documentos">📄 Docs</th>
-                                        <th title="Sección Cotizador">💲 Cotizador</th>
-                                        <th title="Sección RRHH/Solicitudes">👥 RRHH</th>
-                                        <th></th>
-                                    </tr>
+                                <thead id="dept-modules-thead">
+                                    <!-- Cabeceras dinámicas con switches maestros — render en JS -->
                                 </thead>
                                 <tbody id="dept-modules-tbody"></tbody>
                             </table>
@@ -310,7 +308,6 @@
 
         try {
             const headers = { Authorization: 'Bearer ' + Utils.getToken() };
-            // Cargar el contexto RBAC de cada user (paralelo)
             const contexts = await Promise.all(
                 users.map(u =>
                     fetch(`/api/rbac/users/${u.id}/context`, { headers })
@@ -319,40 +316,190 @@
                         .catch(err => ({ user: u, ctx: null, err }))
                 )
             );
-            tbody.innerHTML = contexts.map(({ user, ctx }) => {
-                const perms = new Set((ctx?.permissions) || []);
-                const isAdmin = user.role === 'admin' || perms.has('system.admin');
-                const has = (p) => isAdmin || perms.has(p);
-                const cell = (ok) => ok
-                    ? '<span class="dept-mod-yes" title="Tiene acceso">✓</span>'
-                    : '<span class="dept-mod-no" title="Sin acceso">—</span>';
-                return `
-                    <tr>
-                        <td>
-                            <div class="dept-mod-person">
-                                <div class="by-dept-avatar" style="width:26px; height:26px; font-size:0.72rem;">${escapeHtml((user.full_name || user.username || '?').charAt(0).toUpperCase())}</div>
-                                <div>
-                                    <div style="font-size:0.85rem; font-weight:600; color:var(--text-1);">${escapeHtml(user.full_name)}</div>
-                                    <div style="font-size:0.72rem; color:var(--text-3);">${escapeHtml(user.email)}</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td>${cell(true)}</td>
-                        <td>${cell(true)}</td>
-                        <td>${cell(has('cotizador.use'))}</td>
-                        <td>${cell(has('hr.read.own'))}</td>
-                        <td>
-                            <button class="btn-edit" onclick="openUserPermissions(${user.id}); document.getElementById('dept-modules-modal').classList.remove('active');" title="Editar permisos">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+            _modulesModalState = { deptId, deptName, ctxs: contexts };
+            renderModulesTable();
         } catch (err) {
             console.error('openModules error:', err);
             tbody.innerHTML = `<tr><td colspan="6" class="error" style="text-align:center; padding:1rem; color:var(--danger);">Error al cargar permisos</td></tr>`;
         }
+    }
+
+    // Re-render del thead + tbody del modal de módulos. Usa la cache
+    // _modulesModalState que se actualiza tras cada toggle.
+    function renderModulesTable() {
+        const { ctxs, deptId } = _modulesModalState;
+        const thead = document.getElementById('dept-modules-thead');
+        const tbody = document.getElementById('dept-modules-tbody');
+        if (!thead || !tbody) return;
+        const hasPerm = (ctx, user, perm) => {
+            const set = new Set((ctx?.permissions) || []);
+            if (user.role === 'admin' || set.has('system.admin')) return true;
+            return set.has(perm);
+        };
+        const counts = MODULES.map(m => {
+            const all = ctxs.length;
+            const yes = ctxs.filter(({ ctx, user }) => hasPerm(ctx, user, m.perm)).length;
+            const state = yes === 0 ? 'off' : yes === all ? 'on' : 'mixed';
+            return { ...m, state, yes, all };
+        });
+        // Thead con switches maestros
+        thead.innerHTML = `
+            <tr>
+                <th>Persona</th>
+                <th class="dept-mod-fixed" title="Reportes — se asigna desde el botón Reportes del card">📊 Reportes</th>
+                <th class="dept-mod-fixed" title="Documentos — se asigna desde el botón Documentos del card">📄 Docs</th>
+                ${counts.map(c => `
+                    <th class="dept-mod-toggle-col">
+                        <div class="dept-mod-master">
+                            <span>${c.label}</span>
+                            <button type="button"
+                                    class="dept-switch dept-switch-${c.state}"
+                                    data-perm="${c.perm}"
+                                    data-state="${c.state}"
+                                    onclick="byDept.toggleMaster('${c.perm}')"
+                                    title="${c.state === 'on' ? 'Todos tienen acceso — click para quitar a todos' : c.state === 'off' ? 'Nadie tiene acceso — click para dar a todos' : c.yes + ' de ' + c.all + ' tienen acceso — click para alinear a todos en ON'}">
+                                <span class="dept-switch-thumb"></span>
+                            </button>
+                            <small class="dept-mod-count">${c.yes}/${c.all}</small>
+                        </div>
+                    </th>
+                `).join('')}
+                <th></th>
+            </tr>
+        `;
+        // Tbody con celdas interactivas por user
+        tbody.innerHTML = ctxs.map(({ user, ctx }) => {
+            const isAdmin = user.role === 'admin' || (ctx?.permissions || []).includes('system.admin');
+            const fixedCell = '<span class="dept-mod-yes" title="Siempre activo">✓</span>';
+            const toggleCells = MODULES.map(m => {
+                const on = hasPerm(ctx, user, m.perm);
+                if (isAdmin) {
+                    return `<td><span class="dept-mod-yes" title="Admin del sistema — siempre activo">✓</span></td>`;
+                }
+                return `
+                    <td>
+                        <button type="button"
+                                class="dept-switch dept-switch-${on ? 'on' : 'off'} dept-switch-small"
+                                onclick="byDept.toggleUser(${user.id}, '${m.perm}', ${on ? 'true' : 'false'})"
+                                title="${on ? 'Quitar acceso a ' + (user.full_name || user.username) : 'Dar acceso a ' + (user.full_name || user.username)}">
+                            <span class="dept-switch-thumb"></span>
+                        </button>
+                    </td>
+                `;
+            }).join('');
+            return `
+                <tr>
+                    <td>
+                        <div class="dept-mod-person">
+                            <div class="by-dept-avatar" style="width:26px; height:26px; font-size:0.72rem;">${escapeHtml((user.full_name || user.username || '?').charAt(0).toUpperCase())}</div>
+                            <div>
+                                <div style="font-size:0.85rem; font-weight:600; color:var(--text-1);">${escapeHtml(user.full_name)}${isAdmin ? ' <span class="by-dept-admin-tag">ADMIN</span>' : ''}</div>
+                                <div style="font-size:0.72rem; color:var(--text-3);">${escapeHtml(user.email)}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>${fixedCell}</td>
+                    <td>${fixedCell}</td>
+                    ${toggleCells}
+                    <td>
+                        <button class="btn-edit" onclick="openUserPermissions(${user.id}); document.getElementById('dept-modules-modal').classList.remove('active');" title="Abrir modal individual completo">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // Switch maestro: bulk grant/remove para todos los users del depto.
+    async function toggleMaster(permCode) {
+        const { deptId, deptName, ctxs } = _modulesModalState;
+        if (!deptId) return;
+        const hasPerm = (ctx, user) => {
+            const set = new Set((ctx?.permissions) || []);
+            if (user.role === 'admin' || set.has('system.admin')) return true;
+            return set.has(permCode);
+        };
+        const allHave = ctxs.every(({ ctx, user }) => hasPerm(ctx, user));
+        // Si todos tienen → action 'remove' (quita overrides).
+        // Si no, intentamos llevar a todos a tener → action 'grant'.
+        const action = allHave ? 'remove' : 'grant';
+        try {
+            const r = await fetch(`/api/rbac/departments/${deptId}/bulk-permission`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() },
+                body: JSON.stringify({ permission_code: permCode, action })
+            });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.message || 'Error');
+            const verb = action === 'grant' ? 'Activado' : 'Quitado';
+            Notification.success(`${verb} "${permCode}" para ${deptName} (${j.data?.affected || 0} personas)`);
+            // Refrescar contextos
+            await reloadModulesContexts();
+            renderModulesTable();
+        } catch (err) {
+            console.error('toggleMaster error:', err);
+            Notification.error(err.message || 'Error al aplicar permiso al depto');
+        }
+    }
+
+    // Toggle individual: grant override o quitar override para ese (user, perm).
+    async function toggleUser(userId, permCode, currentlyOn) {
+        try {
+            const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+            let r;
+            if (currentlyOn) {
+                // El user actualmente tiene el permiso. Decisión: quitar el
+                // override si lo tiene, o crear deny si vino del rol.
+                // Simple: intentar DELETE primero (si vino de override grant).
+                // Si después de DELETE sigue teniendo el permiso por el rol,
+                // creamos un deny.
+                const delR = await fetch(`/api/rbac/users/${userId}/permission-overrides/${permCode}`, {
+                    method: 'DELETE', headers
+                });
+                const delJ = await delR.json();
+                // Verificar si todavía tiene el permiso via rol
+                const ctxR = await fetch(`/api/rbac/users/${userId}/context`, { headers });
+                const ctxJ = await ctxR.json();
+                const stillHas = ((ctxJ.data?.permissions) || []).includes(permCode);
+                if (stillHas) {
+                    // Vino del rol — necesitamos deny explícito
+                    await fetch(`/api/rbac/users/${userId}/permission-overrides`, {
+                        method: 'POST', headers,
+                        body: JSON.stringify({ permission_code: permCode, effect: 'deny' })
+                    });
+                }
+            } else {
+                // No lo tiene → grant override
+                r = await fetch(`/api/rbac/users/${userId}/permission-overrides`, {
+                    method: 'POST', headers,
+                    body: JSON.stringify({ permission_code: permCode, effect: 'grant' })
+                });
+                if (!r.ok) {
+                    const j = await r.json().catch(() => ({}));
+                    throw new Error(j.message || 'Error');
+                }
+            }
+            await reloadModulesContexts();
+            renderModulesTable();
+        } catch (err) {
+            console.error('toggleUser error:', err);
+            Notification.error(err.message || 'Error al cambiar permiso del usuario');
+        }
+    }
+
+    async function reloadModulesContexts() {
+        const { ctxs } = _modulesModalState;
+        const headers = { Authorization: 'Bearer ' + Utils.getToken() };
+        const fresh = await Promise.all(
+            ctxs.map(({ user }) =>
+                fetch(`/api/rbac/users/${user.id}/context`, { headers })
+                    .then(r => r.json())
+                    .then(j => ({ user, ctx: j.data || j }))
+                    .catch(() => ({ user, ctx: null }))
+            )
+        );
+        _modulesModalState.ctxs = fresh;
     }
 
     // Modal genérico (reutilizado por reports/docs) — se crea una sola vez y
@@ -468,5 +615,8 @@
     document.addEventListener('user-permissions-saved', () => reload());
 
     // Expose globals
-    window.byDept = { reload, openReports, openDocs, openModules, saveResource };
+    window.byDept = {
+        reload, openReports, openDocs, openModules, saveResource,
+        toggleMaster, toggleUser
+    };
 })();

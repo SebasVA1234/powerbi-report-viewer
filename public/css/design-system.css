@@ -2180,6 +2180,73 @@ input[type="file"]::file-selector-button:hover {
     font-size: 0.9rem;
 }
 
+/* PR-9: switches del modal Módulos */
+.dept-mod-master {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+}
+.dept-mod-count {
+    font-size: 0.65rem;
+    color: var(--text-3);
+}
+.dept-mod-toggle-col {
+    text-align: center !important;
+}
+.dept-mod-fixed {
+    color: var(--text-3) !important;
+    opacity: 0.7;
+}
+.dept-switch {
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 22px;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    background: rgba(148, 163, 184, 0.30);
+    transition: background var(--transition-fast);
+}
+.dept-switch:hover { filter: brightness(1.10); }
+.dept-switch.dept-switch-small { width: 32px; height: 18px; }
+.dept-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    transition: transform var(--transition-fast);
+}
+.dept-switch-small .dept-switch-thumb {
+    width: 14px;
+    height: 14px;
+}
+.dept-switch-on {
+    background: var(--gradient-brand);
+}
+.dept-switch-on .dept-switch-thumb { transform: translateX(16px); }
+.dept-switch-small.dept-switch-on .dept-switch-thumb { transform: translateX(14px); }
+.dept-switch-off { background: rgba(148, 163, 184, 0.30); }
+.dept-switch-off .dept-switch-thumb { transform: translateX(0); }
+.dept-switch-mixed {
+    background: linear-gradient(90deg, var(--primary) 50%, rgba(148, 163, 184, 0.30) 50%);
+}
+.dept-switch-mixed .dept-switch-thumb {
+    transform: translateX(8px);
+    background: rgba(255, 255, 255, 0.85);
+}
+
+@media (prefers-color-scheme: light) {
+    .dept-switch-off { background: rgba(15, 23, 42, 0.15) !important; }
+    .dept-mod-fixed { color: var(--text-3) !important; }
+}
+
 @media (prefers-color-scheme: light) {
     .dept-modules-table thead {
         background: rgba(15, 23, 42, 0.04) !important;

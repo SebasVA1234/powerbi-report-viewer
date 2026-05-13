@@ -50,6 +50,22 @@ router.get('/acl/resource/:type/:id',
 router.get('/acl/principal/:type/:id',
     authMiddleware, requirePermission('permissions.manage'), RbacController.listAclsForPrincipal);
 
+// PR-9: Overrides individuales y bulk por departamento.
+// POST /users/:userId/permission-overrides   { permission_code, effect:'grant'|'deny' }
+//   crea o sobrescribe el override del par (user, permiso).
+// DELETE /users/:userId/permission-overrides/:permCode
+//   quita el override → vuelve a usar solo lo del rol.
+// POST /departments/:deptId/bulk-permission   { permission_code, action }
+//   action = 'grant'  → grant override para todos los users del depto.
+//   action = 'remove' → quita los overrides de ese permiso en el depto.
+//   action = 'deny'   → deny override (raro, pero útil para excluir explícito).
+router.post('/users/:userId/permission-overrides',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.upsertPermissionOverride);
+router.delete('/users/:userId/permission-overrides/:permCode',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.deletePermissionOverride);
+router.post('/departments/:deptId/bulk-permission',
+    authMiddleware, requirePermission('permissions.manage'), RbacController.bulkDeptPermission);
+
 // PR-1c: Categorías de reportes y documentos.
 //   GET /categories?type=report|document&include_archived=0|1   listar
 //   POST /categories                                            crear (categories.manage)

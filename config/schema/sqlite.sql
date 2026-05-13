@@ -326,6 +326,25 @@ CREATE INDEX IF NOT EXISTS idx_user_depts_user ON user_departments(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_depts_dept ON user_departments(department_id);
 CREATE INDEX IF NOT EXISTS idx_departments_active ON departments(is_active);
 
+-- PR-9: Overrides individuales sobre los permisos heredados del rol.
+--   effect='grant' → agrega el permiso al user (aunque el rol no lo dé)
+--   effect='deny'  → quita el permiso al user (aunque el rol sí lo dé)
+-- Si NO hay fila para (user, permission), el user solo tiene lo que dicte
+-- su rol. UNIQUE asegura una sola fila por par — toggle es overwrite/delete.
+CREATE TABLE IF NOT EXISTS user_permission_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    permission_id INTEGER NOT NULL,
+    effect TEXT NOT NULL CHECK(effect IN ('grant','deny')),
+    granted_by INTEGER,
+    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, permission_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions (id) ON DELETE CASCADE,
+    FOREIGN KEY (granted_by) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_perm_ovr_user ON user_permission_overrides(user_id);
+
 -- ============================================================
 -- PR-1b: RESOURCE ACL — asignación de recursos a principales
 -- ============================================================

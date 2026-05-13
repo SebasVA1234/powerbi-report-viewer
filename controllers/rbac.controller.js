@@ -50,6 +50,29 @@ async function getUserContext(userId, req = null) {
     `, [userId]);
     const permissions = new Set(permRows.map(r => r.code));
 
+    // PR-9: aplicar overrides individuales sobre los permisos del rol.
+    //   effect='grant' → agrega aunque el rol no lo dé.
+    //   effect='deny'  → quita aunque el rol sí lo dé.
+    // La tabla user_permission_overrides es opcional — si no existe (DB
+    // vieja) hacemos try/catch para no romper el flow del context.
+    try {
+        const overrideRows = await db.query(`
+            SELECT p.code, upo.effect
+            FROM user_permission_overrides upo
+            JOIN permissions p ON p.id = upo.permission_id
+            WHERE upo.user_id = ?
+        `, [userId]);
+        for (const o of overrideRows) {
+            if (o.effect === 'grant') permissions.add(o.code);
+            else if (o.effect === 'deny') permissions.delete(o.code);
+        }
+    } catch (e) {
+        // Tabla aún no existe (entorno antiguo) — log silencioso, no romper.
+        if (!/no such table|relation .* does not exist/i.test(e.message || '')) {
+            console.warn('user_permission_overrides lookup:', e.message);
+        }
+    }
+
     // Hotfix: respetar el rol legacy users.role='admin'. Antes de PR-1a,
     // ese era el único mecanismo de admin del sistema. Users con
     // users.role='admin' que no tienen el rol RBAC admin_sistema
@@ -539,6 +562,115 @@ class RbacController {
         } catch (err) {
             console.error('archiveCategory:', err);
             res.status(500).json({ success: false, message: 'Error al archivar categoría' });
+        }
+    }
+
+    // PR-9: upsert de un override (permiso individual por user).
+    // Body: { permission_code, effect:'grant'|'deny' }
+    static async upsertPermissionOverride(req, res) {
+        try {
+            const { userId } = req.params;
+            const { permission_code, effect } = req.body;
+            if (!permission_code || !['grant','deny'].includes(effect)) {
+                return res.status(400).json({ success: false, message: 'permission_code y effect (grant|deny) requeridos' });
+            }
+            const perm = await db.queryOne('SELECT id FROM permissions WHERE code = ?', [permission_code]);
+            if (!perm) return res.status(404).json({ success: false, message: `Permiso ${permission_code} no existe` });
+            // Upsert según driver — sqlite usa INSERT OR REPLACE, postgres ON CONFLICT.
+            const upsertSql = db.driver === 'sqlite'
+                ? `INSERT OR REPLACE INTO user_permission_overrides
+                   (user_id, permission_id, effect, granted_by, granted_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
+                : `INSERT INTO user_permission_overrides
+                   (user_id, permission_id, effect, granted_by, granted_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT (user_id, permission_id) DO UPDATE
+                   SET effect = EXCLUDED.effect, granted_by = EXCLUDED.granted_by, granted_at = CURRENT_TIMESTAMP`;
+            await db.execute(upsertSql, [userId, perm.id, effect, req.user.id]);
+            res.json({ success: true, message: 'Override aplicado' });
+        } catch (err) {
+            console.error('upsertPermissionOverride:', err);
+            res.status(500).json({ success: false, message: 'Error al aplicar override' });
+        }
+    }
+
+    // PR-9: quitar un override (vuelve al permiso por defecto del rol).
+    static async deletePermissionOverride(req, res) {
+        try {
+            const { userId, permCode } = req.params;
+            const perm = await db.queryOne('SELECT id FROM permissions WHERE code = ?', [permCode]);
+            if (!perm) return res.status(404).json({ success: false, message: `Permiso ${permCode} no existe` });
+            const r = await db.execute(
+                'DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?',
+                [userId, perm.id]
+            );
+            res.json({ success: true, message: 'Override removido', removed: r.changes || 0 });
+        } catch (err) {
+            console.error('deletePermissionOverride:', err);
+            res.status(500).json({ success: false, message: 'Error al quitar override' });
+        }
+    }
+
+    // PR-9: aplica grant/remove/deny en bulk a TODOS los users del depto.
+    // Body: { permission_code, action:'grant'|'remove'|'deny' }
+    //   'grant'  → crea override grant para cada user del depto que no lo tenga.
+    //   'remove' → borra overrides de ese permiso para users del depto
+    //              (heredarán solo lo del rol).
+    //   'deny'   → crea override deny para cada user (raro, pero útil para
+    //              excluir explícito un depto de un permiso global).
+    static async bulkDeptPermission(req, res) {
+        try {
+            const { deptId } = req.params;
+            const { permission_code, action } = req.body;
+            if (!permission_code || !['grant','remove','deny'].includes(action)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'permission_code y action (grant|remove|deny) requeridos'
+                });
+            }
+            const perm = await db.queryOne('SELECT id FROM permissions WHERE code = ?', [permission_code]);
+            if (!perm) return res.status(404).json({ success: false, message: `Permiso ${permission_code} no existe` });
+
+            const userRows = await db.query(
+                `SELECT u.id FROM users u
+                 JOIN user_departments ud ON ud.user_id = u.id
+                 WHERE ud.department_id = ? AND u.is_active = 1`,
+                [deptId]
+            );
+            const userIds = userRows.map(u => u.id);
+            if (userIds.length === 0) {
+                return res.json({ success: true, data: { affected: 0, total_in_dept: 0 } });
+            }
+
+            let affected = 0;
+            if (action === 'remove') {
+                for (const uid of userIds) {
+                    const r = await db.execute(
+                        'DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?',
+                        [uid, perm.id]
+                    );
+                    affected += (r.changes || 0);
+                }
+            } else {
+                // 'grant' o 'deny' → upsert por cada user
+                const upsertSql = db.driver === 'sqlite'
+                    ? `INSERT OR REPLACE INTO user_permission_overrides
+                       (user_id, permission_id, effect, granted_by, granted_at)
+                       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
+                    : `INSERT INTO user_permission_overrides
+                       (user_id, permission_id, effect, granted_by, granted_at)
+                       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT (user_id, permission_id) DO UPDATE
+                       SET effect = EXCLUDED.effect, granted_by = EXCLUDED.granted_by, granted_at = CURRENT_TIMESTAMP`;
+                for (const uid of userIds) {
+                    await db.execute(upsertSql, [uid, perm.id, action, req.user.id]);
+                    affected++;
+                }
+            }
+            res.json({ success: true, data: { affected, total_in_dept: userIds.length, action } });
+        } catch (err) {
+            console.error('bulkDeptPermission:', err);
+            res.status(500).json({ success: false, message: 'Error al aplicar permiso al depto' });
         }
     }
 
