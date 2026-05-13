@@ -156,10 +156,14 @@ class UserController {
 
             const tempPassword = password || generateTempPassword();
             const hashedPassword = bcrypt.hashSync(tempPassword, 10);
+            // Si el admin proveyó una contraseña específica (no generada),
+            // no forzar cambio — el admin se la comunicó al usuario.
+            // Si fue vacía / generada automáticamente → must_change=1.
+            const mustChange = password ? 0 : 1;
             const result = await db.execute(
                 `INSERT INTO users (username, email, password, full_name, role, must_change_password)
                  VALUES (?, ?, ?, ?, ?, ?)`,
-                [username, email, hashedPassword, full_name, role, 1]
+                [username, email, hashedPassword, full_name, role, mustChange]
             );
 
             // PR-3a: auto-crear el registro de empleado en hr_employees con
