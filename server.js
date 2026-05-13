@@ -126,9 +126,10 @@ const limiter = rateLimit({
 });
 
 // Rate limit más estricto para login (prevenir fuerza bruta)
+// RATE_LIMIT_LOGIN_MAX puede subirse temporalmente para pruebas masivas
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 5, // máximo 5 intentos de login
+    max: parseInt(process.env.RATE_LIMIT_LOGIN_MAX) || 5,
     message: {
         success: false,
         message: 'Demasiados intentos de login, intente en 15 minutos'
