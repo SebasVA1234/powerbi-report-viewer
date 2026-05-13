@@ -544,136 +544,120 @@
                                 </div>
                             </div>
 
-                            <!-- Modo Calcular · PR-5a rediseño "asistente inteligente" -->
+                            <!-- Modo Calcular · COT2 rediseño compacto single-card -->
                             <div id="cot-mode-calcular" class="cot-mode-pane active">
-                                <div class="cotizador-grid">
-                                    <form id="cotizador-form" class="cotizador-form card">
 
-                                        <!-- Sección 1: Ruta de vuelo -->
-                                        <div class="cot-section">
-                                            <div class="cot-section-title">
-                                                <span class="cot-section-num">1</span>
-                                                <span>Ruta de vuelo</span>
+                                <form id="cotizador-form" class="card cot2-shell">
+
+                                    <!-- ROW 1: Ruta + Carguera -->
+                                    <div class="cot2-route-row">
+                                        <!-- Aeropuerto Origen -->
+                                        <div class="cot-airport-field cot2-airport-wrap" data-airport-role="origen">
+                                            <label class="cot2-field-label">Origen</label>
+                                            <div class="cot-airport-input cot2-airport-trigger" tabindex="0" data-airport-input>
+                                                <span class="cot-airport-text cot2-airport-text">Seleccioná...</span>
+                                                <svg class="cot-airport-chev cot2-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                             </div>
-                                            <div class="cot-route-row">
-                                                <div class="cot-airport-field" data-airport-role="origen">
-                                                    <label>Origen</label>
-                                                    <div class="cot-airport-input" tabindex="0" data-airport-input>
-                                                        <div class="cot-airport-selected">
-                                                            <span class="cot-airport-text">Seleccioná...</span>
-                                                        </div>
-                                                        <svg class="cot-airport-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                                    </div>
-                                                    <input type="hidden" id="cot-origen-id">
-                                                    <div class="cot-airport-dropdown" data-airport-dropdown>
-                                                        <input type="text" class="cot-airport-search" placeholder="Escribe ciudad, aeropuerto o código...">
-                                                        <div class="cot-airport-results"></div>
-                                                    </div>
-                                                </div>
-
-                                                <div class="cot-route-arrow">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                                                </div>
-
-                                                <div class="cot-airport-field" data-airport-role="destino">
-                                                    <label>Destino</label>
-                                                    <div class="cot-airport-input" tabindex="0" data-airport-input>
-                                                        <div class="cot-airport-selected">
-                                                            <span class="cot-airport-text">Seleccioná...</span>
-                                                        </div>
-                                                        <svg class="cot-airport-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                                    </div>
-                                                    <input type="hidden" id="cot-destino-id">
-                                                    <div class="cot-airport-dropdown" data-airport-dropdown>
-                                                        <input type="text" class="cot-airport-search" placeholder="Escribe ciudad, aeropuerto o código...">
-                                                        <div class="cot-airport-results"></div>
-                                                    </div>
-                                                </div>
+                                            <input type="hidden" id="cot-origen-id">
+                                            <div class="cot-airport-dropdown" data-airport-dropdown>
+                                                <input type="text" class="cot-airport-search" placeholder="Ciudad, aeropuerto o código IATA...">
+                                                <div class="cot-airport-results"></div>
                                             </div>
                                         </div>
 
-                                        <!-- Sección 2: Carguera y tarifa -->
-                                        <div class="cot-section">
-                                            <div class="cot-section-title">
-                                                <span class="cot-section-num">2</span>
-                                                <span>Carguera y tarifa</span>
-                                            </div>
-                                            <div class="form-row">
-                                                <div class="form-group">
-                                                    <label for="cot-carguera">Carguera *</label>
-                                                    <select id="cot-carguera" required></select>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label for="cot-aerolinea">Aerolínea *</label>
-                                                    <select id="cot-aerolinea" required></select>
-                                                </div>
-                                            </div>
-                                            <div id="cot-tarifa-card" class="cot-tarifa-card" style="display:none;"></div>
+                                        <!-- Flecha separadora -->
+                                        <div class="cot2-route-sep">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
                                         </div>
 
-                                        <!-- Sección 3: Datos del pedido -->
-                                        <div class="cot-section">
-                                            <div class="cot-section-title">
-                                                <span class="cot-section-num">3</span>
-                                                <span>Datos del pedido</span>
+                                        <!-- Aeropuerto Destino -->
+                                        <div class="cot-airport-field cot2-airport-wrap" data-airport-role="destino">
+                                            <label class="cot2-field-label">Destino</label>
+                                            <div class="cot-airport-input cot2-airport-trigger" tabindex="0" data-airport-input>
+                                                <span class="cot-airport-text cot2-airport-text">Seleccioná...</span>
+                                                <svg class="cot-airport-chev cot2-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                             </div>
-                                            <div class="form-row">
-                                                <div class="form-group">
-                                                    <label for="cot-tallos">¿Cuántos tallos vas a enviar?</label>
-                                                    <input type="number" id="cot-tallos" min="1" required placeholder="Ej. 10.000">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label for="cot-tallos-caja">¿Cuántos tallos caben en cada caja?</label>
-                                                    <input type="number" id="cot-tallos-caja" min="1" required placeholder="250">
-                                                </div>
+                                            <input type="hidden" id="cot-destino-id">
+                                            <div class="cot-airport-dropdown" data-airport-dropdown>
+                                                <input type="text" class="cot-airport-search" placeholder="Ciudad, aeropuerto o código IATA...">
+                                                <div class="cot-airport-results"></div>
                                             </div>
-                                            <div class="form-row">
-                                                <div class="form-group">
-                                                    <label for="cot-precio-1">Precio por tallo — Escenario bajo</label>
-                                                    <div class="cot-money-input">
-                                                        <span>$</span>
-                                                        <input type="number" id="cot-precio-1" min="0" step="0.01" required placeholder="0.65">
-                                                    </div>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label for="cot-precio-2">Precio por tallo — Escenario alto</label>
-                                                    <div class="cot-money-input">
-                                                        <span>$</span>
-                                                        <input type="number" id="cot-precio-2" min="0" step="0.01" required placeholder="0.95">
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Peso colapsable -->
-                                            <details class="cot-weight-collapsible">
-                                                <summary>
-                                                    <span class="cot-weight-summary-text">Peso del envío (opcional)</span>
-                                                    <span class="cot-weight-estimate" id="cot-weight-estimate"></span>
-                                                </summary>
-                                                <div class="cot-weight-body">
-                                                    <label for="cot-kilos">Peso real en kilogramos</label>
-                                                    <input type="number" id="cot-kilos" min="0" step="0.01" placeholder="Vacío = se calcula con 0,056 kg/tallo">
-                                                    <input type="hidden" id="cot-fecha">
-                                                </div>
-                                            </details>
                                         </div>
 
-                                        <div class="form-actions cot-actions">
-                                            <button type="submit" class="btn btn-primary cot-calc-btn" id="cot-calc-btn">Calcular Landed Cost</button>
-                                            <button type="button" class="btn btn-outline" id="cot-guardar-btn" disabled>Guardar cotización</button>
+                                        <!-- Separador vertical -->
+                                        <div class="cot2-divider-v"></div>
+
+                                        <!-- Carguera + Aerolínea -->
+                                        <div class="cot2-carriers">
+                                            <div class="cot2-carrier-field">
+                                                <label class="cot2-field-label" for="cot-carguera">Carguera</label>
+                                                <select id="cot-carguera" required></select>
+                                            </div>
+                                            <div class="cot2-carrier-field">
+                                                <label class="cot2-field-label" for="cot-aerolinea">Aerolínea</label>
+                                                <select id="cot-aerolinea" required></select>
+                                            </div>
                                         </div>
-                                    </form>
+                                    </div>
 
-                                    <div id="cotizador-resultado" class="cotizador-resultado"></div>
-                                </div>
+                                    <!-- Tarifa card (aparece al seleccionar carguera) -->
+                                    <div id="cot-tarifa-card" class="cot-tarifa-card" style="display:none;"></div>
 
-                                <div class="card cotizador-historico-wrap">
+                                    <!-- ROW 2: Números del pedido -->
+                                    <div class="cot2-numbers-row">
+                                        <div class="cot2-num-field">
+                                            <label class="cot2-field-label" for="cot-tallos">Tallos</label>
+                                            <input type="number" id="cot-tallos" class="cot2-num-input" min="1" required placeholder="10 000">
+                                            <span class="cot2-kg-hint" id="cot2-kg-hint"></span>
+                                        </div>
+                                        <div class="cot2-num-field">
+                                            <label class="cot2-field-label" for="cot-tallos-caja">Tallos / caja</label>
+                                            <input type="number" id="cot-tallos-caja" class="cot2-num-input" min="1" required placeholder="250">
+                                        </div>
+                                        <div class="cot2-num-field">
+                                            <label class="cot2-field-label" for="cot-precio-1">Precio bajo</label>
+                                            <div class="cot2-price-wrap">
+                                                <span class="cot2-price-prefix">$</span>
+                                                <input type="number" id="cot-precio-1" class="cot2-num-input" min="0" step="0.01" required placeholder="0.65">
+                                            </div>
+                                        </div>
+                                        <div class="cot2-num-field">
+                                            <label class="cot2-field-label" for="cot-precio-2">Precio alto</label>
+                                            <div class="cot2-price-wrap">
+                                                <span class="cot2-price-prefix">$</span>
+                                                <input type="number" id="cot-precio-2" class="cot2-num-input" min="0" step="0.01" required placeholder="0.95">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Campos ocultos requeridos por la lógica -->
+                                    <input type="number" id="cot-kilos" style="display:none;" min="0" step="0.01">
+                                    <input type="hidden" id="cot-fecha">
+                                    <span id="cot-weight-estimate" style="display:none;"></span>
+
+                                    <!-- ROW 3: Acciones -->
+                                    <div class="cot2-actions">
+                                        <button type="submit" class="cot2-calc-btn" id="cot-calc-btn">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="9" x2="15" y2="9"></line><line x1="9" y1="13" x2="15" y2="13"></line><line x1="9" y1="17" x2="13" y2="17"></line></svg>
+                                            Calcular Landed Cost
+                                        </button>
+                                        <button type="button" class="btn btn-outline" id="cot-guardar-btn" disabled>Guardar</button>
+                                    </div>
+
+                                </form>
+
+                                <!-- Resultado (fuera del form) -->
+                                <div id="cotizador-resultado" class="cot2-result-block"></div>
+
+                                <!-- Histórico reciente -->
+                                <div class="card cotizador-historico-wrap" style="margin-top:1.5rem;">
                                     <div class="reports-section-header">
                                         <h3>Mis cotizaciones recientes</h3>
                                         <button class="btn btn-outline" type="button" onclick="loadCotizacionesHistorico()">Actualizar</button>
                                     </div>
                                     <div id="cotizador-historico"></div>
                                 </div>
+
                             </div>
 
                             <!-- Modo Historial · PR-5d -->
