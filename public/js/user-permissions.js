@@ -146,7 +146,7 @@
             this.renderDeptCheckboxes(userDepts, isAdmin);
 
             // ---- Accesos individuales: reportes y documentos ----
-            this.renderIndividualAccess(userId);
+            this.renderIndividualAccess(this.currentUserId);
 
             // ---- Pane "Permisos efectivos" (dentro de Permisos como details) ----
             this.renderEffectivePermissions(userPerms, isAdmin);
