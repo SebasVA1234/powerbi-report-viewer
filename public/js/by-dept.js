@@ -528,9 +528,12 @@
                     <button class="btn-close" onclick="document.getElementById('dept-resource-modal').classList.remove('active')">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <p style="font-size:0.85rem; color:var(--text-3); margin: 0 0 0.85rem 0;">
-                        Marcá los recursos que el departamento <strong>"${escapeHtml(deptName)}"</strong> debe ver. Todos los miembros del depto los verán automáticamente.
-                    </p>
+                    <div style="display:flex;align-items:flex-start;gap:0.6rem;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:var(--radius-md);padding:0.65rem 0.85rem;margin-bottom:0.85rem;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:#818cf8;flex-shrink:0;margin-top:2px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        <p style="font-size:0.82rem;color:var(--text-2);margin:0;">
+                            Esto aplica a <strong>todo el departamento</strong>. Para dar acceso solo a una persona específica, cerrá este modal y usá el botón <strong>✏️ Editar</strong> de esa persona → pestaña Permisos → Reportes/Documentos individuales.
+                        </p>
+                    </div>
                     <div class="dept-resource-list"></div>
                 </div>
                 <div class="modal-footer">

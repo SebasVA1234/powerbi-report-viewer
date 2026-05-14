@@ -1378,6 +1378,23 @@
                             <p class="perm-section-help">Define qué documentos puede ver (filtra por departamento del documento).</p>
                         </div>
 
+                        <!-- Accesos individuales: reportes y documentos específicos para esta persona -->
+                        <details class="perm-section" id="user-perm-reports-section">
+                            <summary class="perm-section-title" style="cursor:pointer;">📊 Reportes individuales</summary>
+                            <p class="perm-section-help" style="margin-top:0.5rem;">Reportes visibles SOLO para esta persona (además de los heredados por departamento).</p>
+                            <div id="user-perm-reports" class="dept-grid" style="margin-top:0.65rem;">
+                                <em style="color:var(--text-3); font-size:0.85rem; grid-column:1/-1;">Cargando…</em>
+                            </div>
+                        </details>
+
+                        <details class="perm-section" id="user-perm-docs-section">
+                            <summary class="perm-section-title" style="cursor:pointer;">📄 Documentos individuales</summary>
+                            <p class="perm-section-help" style="margin-top:0.5rem;">Documentos visibles SOLO para esta persona (además de los heredados por departamento).</p>
+                            <div id="user-perm-docs" class="dept-grid" style="margin-top:0.65rem;">
+                                <em style="color:var(--text-3); font-size:0.85rem; grid-column:1/-1;">Cargando…</em>
+                            </div>
+                        </details>
+
                         <details class="perm-section">
                             <summary class="perm-section-title" style="cursor:pointer;">Ver permisos efectivos (avanzado)</summary>
                             <div class="perm-effective-grid" id="user-perm-effective" style="margin-top:0.65rem;">

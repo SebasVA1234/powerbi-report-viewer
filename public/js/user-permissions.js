@@ -145,6 +145,9 @@
             this.renderRoleSelect(userRoles, isAdmin);
             this.renderDeptCheckboxes(userDepts, isAdmin);
 
+            // ---- Accesos individuales: reportes y documentos ----
+            this.renderIndividualAccess(userId);
+
             // ---- Pane "Permisos efectivos" (dentro de Permisos como details) ----
             this.renderEffectivePermissions(userPerms, isAdmin);
 
@@ -195,6 +198,56 @@
                     </label>
                 `;
             }).join('');
+        },
+
+        // Carga los reportes y documentos disponibles + los que el usuario tiene
+        // asignados individualmente (principal_type='user' en resource_acl).
+        // Guarda en this.originalReportAcls / this.originalDocAcls para el diff en save().
+        async renderIndividualAccess(userId) {
+            const rCont = document.getElementById('user-perm-reports');
+            const dCont = document.getElementById('user-perm-docs');
+            if (!rCont || !dCont) return;
+
+            const hdr = { Authorization: 'Bearer ' + Utils.getToken() };
+            try {
+                const [allReportsR, allDocsR, userAclsR] = await Promise.all([
+                    fetch('/api/reports',             { headers: hdr }).then(r => r.json()),
+                    fetch('/api/documents',           { headers: hdr }).then(r => r.json()),
+                    fetch(`/api/rbac/acl/principal/user/${userId}`, { headers: hdr }).then(r => r.json())
+                ]);
+                const reports = (allReportsR.data?.reports) || [];
+                const docs    = (allDocsR.data?.documents)  || [];
+                const userAcls = (userAclsR.data?.acls) || [];
+
+                const assignedReports = new Set(
+                    userAcls.filter(a => a.resource_type === 'report').map(a => Number(a.resource_id))
+                );
+                const assignedDocs = new Set(
+                    userAcls.filter(a => a.resource_type === 'document').map(a => Number(a.resource_id))
+                );
+
+                // Guardar el estado original para el diff al guardar
+                this.originalReportAcls = new Set(assignedReports);
+                this.originalDocAcls    = new Set(assignedDocs);
+
+                const makeCheckboxes = (items, assignedSet, type) => {
+                    if (!items.length) return '<em style="color:var(--text-3);font-size:0.85rem;grid-column:1/-1;">No hay ' + (type === 'report' ? 'reportes' : 'documentos') + ' creados.</em>';
+                    return items.map(it => {
+                        const checked = assignedSet.has(Number(it.id)) ? 'checked' : '';
+                        return `<label class="dept-check">
+                            <input type="checkbox" data-acl-type="${type}" value="${it.id}" ${checked}>
+                            <span style="font-size:0.82rem;">${escapeHtml(it.name || it.filename || 'Sin nombre')}</span>
+                        </label>`;
+                    }).join('');
+                };
+
+                rCont.innerHTML = makeCheckboxes(reports, assignedReports, 'report');
+                dCont.innerHTML = makeCheckboxes(docs,    assignedDocs,    'document');
+            } catch (err) {
+                console.warn('[userPerm] renderIndividualAccess error:', err);
+                rCont.innerHTML = '<em style="color:var(--text-3);font-size:0.82rem;grid-column:1/-1;">Error al cargar.</em>';
+                dCont.innerHTML = '<em style="color:var(--text-3);font-size:0.82rem;grid-column:1/-1;">Error al cargar.</em>';
+            }
         },
 
         renderEffectivePermissions(perms, _isAdmin) {
@@ -420,7 +473,38 @@
                 }
             }
 
-            if (operations.length === 0) {
+            // ---- Diff de accesos individuales (reportes y documentos) ----
+            const aclOps = []; // se ejecutan aparte (no retornan .ok en el mismo formato)
+            const aclH = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
+
+            const diffAcl = async (type, originalSet, containerId) => {
+                const currentChecked = new Set(
+                    Array.from(document.querySelectorAll(`#${containerId} input[data-acl-type="${type}"]:checked`))
+                        .map(cb => Number(cb.value))
+                );
+                const toAdd    = [...currentChecked].filter(id => !originalSet.has(id));
+                const toRemove = [...originalSet].filter(id => !currentChecked.has(id));
+
+                for (const resourceId of toAdd) {
+                    aclOps.push(fetch('/api/rbac/acl', {
+                        method: 'POST', headers: aclH,
+                        body: JSON.stringify({ resource_type: type, resource_id: resourceId, principal_type: 'user', principal_id: userId, actions: ['view'] })
+                    }).then(r => r.json()));
+                }
+                if (toRemove.length > 0) {
+                    // Necesitamos los ACL ids para borrar
+                    const existingR = await fetch(`/api/rbac/acl/principal/user/${userId}`, { headers: aclH }).then(r => r.json());
+                    const existing = (existingR.data?.acls) || [];
+                    for (const acl of existing.filter(a => a.resource_type === type && toRemove.includes(Number(a.resource_id)))) {
+                        aclOps.push(fetch(`/api/rbac/acl/${acl.id}`, { method: 'DELETE', headers: aclH }).then(r => r.json()));
+                    }
+                }
+            };
+
+            await diffAcl('report',   this.originalReportAcls || new Set(), 'user-perm-reports');
+            await diffAcl('document', this.originalDocAcls    || new Set(), 'user-perm-docs');
+
+            if (operations.length === 0 && aclOps.length === 0) {
                 Notification.info('No hay cambios para guardar');
                 return;
             }
@@ -433,7 +517,8 @@
                         throw new Error(j.message || op.label + ' falló');
                     }
                 }
-                Notification.success(`${operations.length} cambio(s) aplicados`);
+                if (aclOps.length > 0) await Promise.all(aclOps);
+                Notification.success(`Cambios guardados correctamente`);
                 closeModal('user-permissions-modal');
                 if (typeof loadUsers === 'function') loadUsers();
             } catch (err) {

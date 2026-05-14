@@ -116,7 +116,7 @@ app.use(helmet({
 // Rate limiting (Seguridad contra ataques de fuerza bruta)
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 300, // app interna — admin hace muchas llamadas
     message: {
         success: false,
         message: 'Demasiadas peticiones, intente más tarde'
