@@ -816,20 +816,21 @@ function showClonePermissionsModal() { Notification.info('Clonación de permisos
 //   - dejarla vacía y dar OK -> el backend genera una pass temporal y
 //     la devuelve UNA SOLA VEZ, que mostramos al admin con copiarla.
 
-// Mostrar la contraseña temporal devuelta por el backend.
-// Es un alert nativo intencional: la UI definitiva (modal con copiar)
-// llega en Fase 2 (design system). Lo importante es que el admin
-// NUNCA pueda ver la pass de otra forma.
-function showTempPassword(tempPass, username) {
-    const msg =
-`Contraseña temporal para ${username}:
+// Mostrar la contraseña temporal devuelta por el backend en un modal del
+// design system (infoDialog). Lo importante es que el admin NUNCA pueda ver
+// la pass de otra forma; se muestra UNA sola vez para copiarla.
+async function showTempPassword(tempPass, username) {
+    await infoDialog({
+        title: 'Contraseña temporal',
+        message:
+`Para: ${username}
 
   ${tempPass}
 
-Cópiela y entrégueselo al usuario por canal seguro.
+Copiala y entregásela al usuario por un canal seguro.
 El sistema NO la mostrará otra vez.
-El usuario debe cambiarla en su primer ingreso.`;
-    window.alert(msg);
+El usuario debe cambiarla en su primer ingreso.`
+    });
 }
 
 // Función para abrir el modal de edición con los datos del usuario

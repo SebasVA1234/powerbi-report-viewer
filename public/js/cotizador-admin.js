@@ -359,7 +359,12 @@ const cotizadorAdmin = (function () {
         if (!pais) return;
         const rubros = parseRubros(pais.rubros_dinamicos);
         if (idx < 0 || idx >= rubros.length) return;
-        if (!confirm(`¿Quitar el costo "${rubros[idx].nombre}" de ${pais.country_name}?`)) return;
+        const ok = await confirmDialog({
+            title: '¿Quitar costo?',
+            message: `Vas a quitar el costo "${rubros[idx].nombre}" de ${pais.country_name}.`,
+            confirmText: 'Quitar'
+        });
+        if (!ok) return;
         rubros.splice(idx, 1);
         await persistRubros(code, pais.country_name, pais, rubros);
     }

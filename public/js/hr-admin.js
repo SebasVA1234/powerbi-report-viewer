@@ -786,7 +786,13 @@ const hrAdmin = (function () {
     // Pensado para una sola corrida después de crear muchos usuarios, pero
     // es idempotente: si ya están todos sincronizados devuelve created: 0.
     async function syncFromUsers() {
-        if (!confirm('Esto creará un perfil de empleado mínimo para cada usuario activo que aún no tenga uno. ¿Continuar?')) return;
+        const ok = await confirmDialog({
+            title: '¿Sincronizar perfiles de empleado?',
+            message: 'Se creará un perfil de empleado mínimo para cada usuario activo que aún no tenga uno. Es idempotente (si ya están todos, no hace nada).',
+            confirmText: 'Sincronizar',
+            danger: false
+        });
+        if (!ok) return;
         try {
             const r = await api('POST', '/api/hr/employees/sync-from-users');
             const created = r.data?.created ?? 0;
