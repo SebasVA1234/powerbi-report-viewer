@@ -73,12 +73,17 @@ const rbacAdmin = (function () {
     }
 
     async function openCreateDepartment() {
-        const code = window.prompt('Code (snake_case, ej: logistica):');
-        if (!code) return;
-        const name = window.prompt('Nombre (ej: Logística):');
-        if (!name) return;
+        const data = await formDialog({
+            title: 'Nuevo departamento',
+            fields: [
+                { name: 'code', label: 'Código (snake_case)', type: 'text', required: true, placeholder: 'ej: logistica' },
+                { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'ej: Logística' }
+            ],
+            confirmText: 'Crear departamento'
+        });
+        if (!data) return;
         try {
-            await api('POST', '/api/rbac/departments', { code, name });
+            await api('POST', '/api/rbac/departments', { code: data.code.trim(), name: data.name.trim() });
             Notification.success('Departamento creado');
             loadDepartments();
         } catch (err) {
@@ -87,10 +92,16 @@ const rbacAdmin = (function () {
     }
 
     async function editDepartment(id, currentName, currentActive) {
-        const newName = window.prompt('Nuevo nombre:', currentName);
-        if (newName === null) return;
+        const data = await formDialog({
+            title: 'Editar departamento',
+            fields: [
+                { name: 'name', label: 'Nuevo nombre', type: 'text', required: true, default: currentName }
+            ],
+            confirmText: 'Guardar'
+        });
+        if (!data) return;
         try {
-            await api('PUT', `/api/rbac/departments/${id}`, { name: newName });
+            await api('PUT', `/api/rbac/departments/${id}`, { name: data.name.trim() });
             Notification.success('Departamento actualizado');
             loadDepartments();
         } catch (err) {
@@ -99,7 +110,12 @@ const rbacAdmin = (function () {
     }
 
     async function archiveDepartment(id) {
-        if (!window.confirm('¿Archivar este departamento? Sus miembros y ACLs históricas se preservan.')) return;
+        const ok = await confirmDialog({
+            title: '¿Archivar departamento?',
+            message: 'Sus miembros y ACLs históricas se preservan. Podés reactivarlo después.',
+            confirmText: 'Archivar'
+        });
+        if (!ok) return;
         try {
             await api('POST', `/api/rbac/departments/${id}/archive`);
             Notification.success('Departamento archivado');
@@ -145,14 +161,19 @@ const rbacAdmin = (function () {
     }
 
     async function openCreateCategory() {
-        const type = window.prompt('Tipo (report o document):', 'report');
-        if (!type || !['report', 'document'].includes(type)) return;
-        const code = window.prompt('Code (snake_case, ej: finanzas):');
-        if (!code) return;
-        const name = window.prompt('Nombre (ej: Finanzas):');
-        if (!name) return;
+        const data = await formDialog({
+            title: 'Nueva categoría',
+            fields: [
+                { name: 'type', label: 'Tipo', type: 'select', required: true, default: 'report',
+                  options: [{ value: 'report', label: 'Reporte' }, { value: 'document', label: 'Documento' }] },
+                { name: 'code', label: 'Código (snake_case)', type: 'text', required: true, placeholder: 'ej: finanzas' },
+                { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'ej: Finanzas' }
+            ],
+            confirmText: 'Crear categoría'
+        });
+        if (!data) return;
         try {
-            await api('POST', '/api/rbac/categories', { type, code, name });
+            await api('POST', '/api/rbac/categories', { type: data.type, code: data.code.trim(), name: data.name.trim() });
             Notification.success('Categoría creada');
             loadCategories();
         } catch (err) {
@@ -161,10 +182,16 @@ const rbacAdmin = (function () {
     }
 
     async function editCategory(id, currentName, currentActive) {
-        const newName = window.prompt('Nuevo nombre:', currentName);
-        if (newName === null) return;
+        const data = await formDialog({
+            title: 'Editar categoría',
+            fields: [
+                { name: 'name', label: 'Nuevo nombre', type: 'text', required: true, default: currentName }
+            ],
+            confirmText: 'Guardar'
+        });
+        if (!data) return;
         try {
-            await api('PUT', `/api/rbac/categories/${id}`, { name: newName });
+            await api('PUT', `/api/rbac/categories/${id}`, { name: data.name.trim() });
             Notification.success('Categoría actualizada');
             loadCategories();
         } catch (err) {
@@ -173,7 +200,12 @@ const rbacAdmin = (function () {
     }
 
     async function archiveCategory(id) {
-        if (!window.confirm('¿Archivar esta categoría?')) return;
+        const ok = await confirmDialog({
+            title: '¿Archivar categoría?',
+            message: 'Podés reactivarla después.',
+            confirmText: 'Archivar'
+        });
+        if (!ok) return;
         try {
             await api('POST', `/api/rbac/categories/${id}/archive`);
             Notification.success('Categoría archivada');
