@@ -167,6 +167,128 @@ async function migrateDocumentsStorageKey() {
     }
 }
 
+// F1: extiende time_off_requests para el workflow multinivel + firma + descuento.
+// Idempotente y driver-aware. Agrega columnas Y amplía el CHECK de `status`
+// (de pending/approved/rejected/cancelled a +pending_jefe/+pending_tthh).
+// ⚠️ El CHECK ampliado vive en el .sql para instalaciones NUEVAS, pero en una DB
+// EXISTENTE el CREATE TABLE IF NOT EXISTS se saltea → el CHECK viejo sobrevive y
+// rechazaría los estados nuevos. Por eso hay que recrearlo aquí:
+//   - Postgres: ALTER TABLE DROP/ADD CONSTRAINT (sí lo soporta).
+//   - SQLite (no soporta DROP CONSTRAINT): reconstrucción de tabla (12 pasos),
+//     sólo si se detecta el CHECK viejo.
+// Las tablas nuevas (hr_signatures, hr_approval_steps, hr_request_attachments)
+// las crea loadSchema() vía CREATE TABLE IF NOT EXISTS.
+const F1_STATUS_VALUES = "'pending','pending_jefe','pending_tthh','approved','rejected','cancelled'";
+const F1_DISCOUNT_VALUES = "'pending','discount','waived'";
+
+async function migrateTimeOffWorkflowF1() {
+    // [columna, definición SQLite, definición Postgres]. NOT NULL DEFAULT es seguro
+    // al agregar columnas sobre filas existentes (el motor rellena con el default).
+    const NEW_COLUMNS = [
+        ['discount_decision',
+            "TEXT NOT NULL DEFAULT 'pending'",
+            "TEXT NOT NULL DEFAULT 'pending'"],
+        ['waived_by',         'INTEGER', 'INTEGER'],
+        ['waived_reason',     'TEXT',    'TEXT'],
+        ['balance_marked_at', 'DATETIME', 'TIMESTAMP']
+    ];
+
+    if (db.driver === 'sqlite') {
+        const cols = await db.query('PRAGMA table_info(time_off_requests)');
+        const have = new Set(cols.map(c => c.name));
+        for (const [name, sqliteDef] of NEW_COLUMNS) {
+            if (!have.has(name)) {
+                await db.exec(`ALTER TABLE time_off_requests ADD COLUMN ${name} ${sqliteDef}`);
+                console.log(`🔧 Migración F1: columna ${name} añadida a time_off_requests`);
+            }
+        }
+        // ¿El CHECK de status sigue siendo el viejo? Lo detectamos en el DDL guardado.
+        // Si ya contiene 'pending_jefe', la tabla es nueva (del .sql) → nada que hacer.
+        const ddlRow = await db.queryOne("SELECT sql FROM sqlite_master WHERE type='table' AND name='time_off_requests'");
+        if (ddlRow && ddlRow.sql && !ddlRow.sql.includes('pending_jefe')) {
+            console.log('🔧 Migración F1: reconstruyendo time_off_requests para ampliar el CHECK de status (SQLite)...');
+            await rebuildTimeOffRequestsSqlite();
+        }
+    } else {
+        const cols = await db.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'time_off_requests'"
+        );
+        const have = new Set(cols.map(c => c.column_name));
+        for (const [name, , pgDef] of NEW_COLUMNS) {
+            if (!have.has(name)) {
+                await db.exec(`ALTER TABLE time_off_requests ADD COLUMN ${name} ${pgDef}`);
+                console.log(`🔧 Migración F1: columna ${name} añadida a time_off_requests`);
+            }
+        }
+        // Postgres SÍ puede recrear constraints. En una DB EXISTENTE el CHECK viejo
+        // de status rechazaría pending_jefe/pending_tthh → lo reemplazamos. Idempotente
+        // (DROP IF EXISTS + ADD). El nombre autogenerado de un CHECK inline es
+        // <tabla>_<col>_check. También agregamos el CHECK de discount_decision (la
+        // columna se sumó arriba sin CHECK en DBs existentes).
+        await db.exec('ALTER TABLE time_off_requests DROP CONSTRAINT IF EXISTS time_off_requests_status_check');
+        await db.exec(`ALTER TABLE time_off_requests ADD CONSTRAINT time_off_requests_status_check CHECK (status IN (${F1_STATUS_VALUES}))`);
+        await db.exec('ALTER TABLE time_off_requests DROP CONSTRAINT IF EXISTS time_off_requests_discount_decision_check');
+        await db.exec(`ALTER TABLE time_off_requests ADD CONSTRAINT time_off_requests_discount_decision_check CHECK (discount_decision IN (${F1_DISCOUNT_VALUES}))`);
+        console.log('🔧 Migración F1: CHECK de status/discount_decision actualizado (Postgres)');
+    }
+}
+
+// SQLite no soporta ALTER ... DROP CONSTRAINT, así que para ampliar el CHECK de
+// status en una DB EXISTENTE reconstruimos la tabla (procedimiento oficial de 12
+// pasos). Seguro: foreign_keys OFF, tabla nueva con el schema F1, copia explícita
+// de TODAS las columnas (las F1 ya se agregaron antes), swap, recrear índices, y
+// transacción con ROLLBACK si algo falla. Sólo se invoca si se detectó el CHECK viejo.
+async function rebuildTimeOffRequestsSqlite() {
+    await db.exec('PRAGMA foreign_keys=OFF');
+    await db.exec('BEGIN');
+    try {
+        await db.exec(`CREATE TABLE time_off_requests_f1new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            request_type TEXT NOT NULL CHECK(request_type IN ('vacaciones','feriado_compensado','permiso_personal','enfermedad','otro')),
+            date_from DATE NOT NULL,
+            date_to DATE NOT NULL,
+            days_count REAL NOT NULL,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN (${F1_STATUS_VALUES})),
+            discount_decision TEXT NOT NULL DEFAULT 'pending' CHECK(discount_decision IN (${F1_DISCOUNT_VALUES})),
+            waived_by INTEGER,
+            waived_reason TEXT,
+            balance_marked_at DATETIME,
+            requested_by INTEGER,
+            approved_by INTEGER,
+            approved_at DATETIME,
+            rejection_reason TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
+            FOREIGN KEY (requested_by) REFERENCES users (id),
+            FOREIGN KEY (approved_by) REFERENCES users (id),
+            FOREIGN KEY (waived_by) REFERENCES users (id)
+        )`);
+        await db.exec(`INSERT INTO time_off_requests_f1new
+            (id, employee_id, request_type, date_from, date_to, days_count, reason, status,
+             discount_decision, waived_by, waived_reason, balance_marked_at,
+             requested_by, approved_by, approved_at, rejection_reason, created_at, updated_at)
+            SELECT
+             id, employee_id, request_type, date_from, date_to, days_count, reason, status,
+             discount_decision, waived_by, waived_reason, balance_marked_at,
+             requested_by, approved_by, approved_at, rejection_reason, created_at, updated_at
+            FROM time_off_requests`);
+        await db.exec('DROP TABLE time_off_requests');
+        await db.exec('ALTER TABLE time_off_requests_f1new RENAME TO time_off_requests');
+        await db.exec('CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id)');
+        await db.exec('CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status)');
+        await db.exec('CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to)');
+        await db.exec('COMMIT');
+    } catch (err) {
+        await db.exec('ROLLBACK');
+        throw err;
+    } finally {
+        await db.exec('PRAGMA foreign_keys=ON');
+    }
+}
+
 // PR-0b.1: agrega users.totp_secret y users.totp_enabled (2FA TOTP).
 // Idempotente: detecta el estado y aplica solo lo que falta.
 async function migrateUsersTotpFields() {
@@ -321,6 +443,8 @@ async function seedRbac() {
         // PR-3c: solicitudes de tiempo libre
         ['hr.timeoff.request', 'hr',         'timeoff.request',  'Solicitar días libres (cualquier empleado)'],
         ['hr.timeoff.approve', 'hr',         'timeoff.approve',  'Aprobar/rechazar solicitudes (jefe / RRHH)'],
+        // F1: override "justificado sin descuento" (exclusivo TTHH/gerencia).
+        ['hr.timeoff.waive_discount', 'hr',  'timeoff.waive_discount', 'Justificar una solicitud sin descuento de saldo (override exclusivo TTHH)'],
         // PR-3d: memos / comunicados
         ['hr.memos.read',      'hr',         'memos.read',       'Leer los propios memos / comunicados'],
         ['hr.memos.write',     'hr',         'memos.write',      'Emitir memos a empleados (RRHH/Gerencia)']
@@ -400,6 +524,7 @@ async function seedRbac() {
         'hr.read.all', 'hr.write', 'hr.salary.write', 'hr.documents.upload', 'hr.positions.manage',
         'hr.holidays.manage', 'hr.attendance.manage',  // PR-3b
         'hr.timeoff.approve',                           // PR-3c
+        'hr.timeoff.waive_discount',                    // F1: override de descuento (TTHH)
         'hr.memos.read', 'hr.memos.write'               // PR-3d
     ]);
 
@@ -781,6 +906,9 @@ async function init() {
     await migrateUsersAuthFields();
     await migrateUsersTotpFields();
     await migrateDocumentsStorageKey();
+    // F1: agrega las columnas del workflow multinivel a time_off_requests en
+    // instalaciones existentes (las tablas nuevas ya las creó loadSchema).
+    await migrateTimeOffWorkflowF1();
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();

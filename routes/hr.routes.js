@@ -9,11 +9,34 @@
  *   /me            mi perfil RRHH (cualquier user logueado)
  */
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { requirePermission } = require('../controllers/rbac.controller');
 const HrController = require('../controllers/hr.controller');
 const HrMemosController = require('../controllers/hr_memos.controller');
+
+// F1: límite y tipos permitidos para los justificativos de time-off.
+const TIMEOFF_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB (x-max-bytes de la spec)
+const TIMEOFF_ATTACHMENT_MIME = ['application/pdf', 'image/png', 'image/jpeg'];
+
+// Multer en memoria: el adjunto se persiste al volumen vía storage_key (NO BLOB).
+// fileFilter rechaza tipos no permitidos; el límite de tamaño dispara
+// LIMIT_FILE_SIZE que el handler de errores traduce a 413.
+const timeoffUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: TIMEOFF_ATTACHMENT_MAX_BYTES },
+    fileFilter: (req, file, cb) => {
+        if (TIMEOFF_ATTACHMENT_MIME.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            // Marcamos el error para que el handler responda 415 (no 400 genérico).
+            const err = new Error('Tipo de archivo no permitido (solo PDF/PNG/JPEG)');
+            err.code = 'UNSUPPORTED_MEDIA_TYPE';
+            cb(err);
+        }
+    }
+});
 
 // Perfiles de cargo
 router.get('/positions',           authMiddleware, HrController.listPositions);
@@ -55,17 +78,28 @@ router.delete('/attendance/:attendanceId',
 // Saldo del banco de días compensados por empleado.
 router.get('/employees/:id/compensated-balance', authMiddleware, HrController.getCompensatedBalance);
 
-// PR-3c: Solicitudes de tiempo libre (vacaciones / permisos / feriado compensado).
-//   - listar / crear: cualquier user logueado (la visibilidad la filtra el controller).
-//   - aprobar / rechazar: requiere hr.timeoff.approve (jefes y RRHH).
+// PR-3c + F1: Solicitudes de tiempo libre con firma + aprobación multinivel + adjuntos.
+//   - listar: cualquier user logueado (la visibilidad la filtra el controller).
+//   - crear+firmar: hr.timeoff.request (el propio empleado; RRHH/admin por otro).
+//   - adjuntar justificativo: hr.timeoff.request (dueño o RRHH); multipart 'file'.
+//   - aprobar / rechazar: hr.timeoff.approve (el nivel jefe/tthh lo decide el controller).
+//   - decidir descuento (waive): hr.timeoff.waive_discount (EXCLUSIVO TTHH/gerencia).
 //   - cancelar: el dueño de la solicitud O quien tenga hr.timeoff.approve.
+//   - historial: cualquier user logueado dentro de su scope de visibilidad.
 router.get('/time-off',                  authMiddleware, HrController.listTimeOffRequests);
-router.post('/time-off',                 authMiddleware, HrController.createTimeOffRequest);
+router.post('/time-off',
+    authMiddleware, requirePermission('hr.timeoff.request'), HrController.crearSolicitudFirmada);
+router.post('/time-off/:id/attachment',
+    authMiddleware, requirePermission('hr.timeoff.request'),
+    timeoffUpload.single('file'), HrController.subirJustificativo);
 router.post('/time-off/:id/approve',
-    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.approveTimeOffRequest);
+    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.aprobarSolicitud);
 router.post('/time-off/:id/reject',
-    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.rejectTimeOffRequest);
+    authMiddleware, requirePermission('hr.timeoff.approve'), HrController.rechazarSolicitud);
+router.post('/time-off/:id/discount-decision',
+    authMiddleware, requirePermission('hr.timeoff.waive_discount'), HrController.decidirDescuento);
 router.post('/time-off/:id/cancel',       authMiddleware, HrController.cancelTimeOffRequest);
+router.get('/time-off/:id/approval-history', authMiddleware, HrController.obtenerHistorialAprobacion);
 
 // PR-3d: Memos / comunicados a empleados (historial inmutable).
 //   - inbox / sent / get: cualquier user logueado (visibilidad en controller).
@@ -76,5 +110,24 @@ router.get('/memos/sent',   authMiddleware, requirePermission('hr.memos.read'), 
 router.get('/memos/:id',    authMiddleware, requirePermission('hr.memos.read'), HrMemosController.getMemo);
 router.post('/memos',       authMiddleware, requirePermission('hr.memos.write'), HrMemosController.createMemo);
 router.post('/memos/:id/ack', authMiddleware, requirePermission('hr.memos.read'), HrMemosController.acknowledgeMemo);
+
+// F1: handler de errores de subida (adjuntos de time-off). Traduce los errores
+// de multer a los códigos HTTP de la spec: tamaño → 413, tipo no permitido → 415.
+// eslint-disable-next-line no-unused-vars
+router.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ success: false, message: 'El archivo excede el tamaño máximo (10 MB)' });
+        }
+        return res.status(400).json({ success: false, message: `Error de subida: ${err.message}` });
+    }
+    if (err && err.code === 'UNSUPPORTED_MEDIA_TYPE') {
+        return res.status(415).json({ success: false, message: err.message });
+    }
+    if (err) {
+        return res.status(400).json({ success: false, message: err.message || 'Error al procesar el archivo' });
+    }
+    next();
+});
 
 module.exports = router;

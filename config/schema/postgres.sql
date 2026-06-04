@@ -448,6 +448,9 @@ CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holi
 -- ============================================================
 -- PR-3c: SOLICITUDES DE TIEMPO LIBRE (ver sqlite.sql)
 -- ============================================================
+-- Workflow F1 (multinivel): SÓLO 'vacaciones' pasa por el jefe. Ver sqlite.sql
+-- para la máquina de estados completa. 'pending' se conserva por compatibilidad
+-- con filas históricas.
 CREATE TABLE IF NOT EXISTS time_off_requests (
     id SERIAL PRIMARY KEY,
     employee_id INTEGER NOT NULL,
@@ -458,7 +461,13 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
     days_count NUMERIC(5,2) NOT NULL,
     reason TEXT,
     status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending','approved','rejected','cancelled')),
+        CHECK(status IN ('pending','pending_jefe','pending_tthh','approved','rejected','cancelled')),
+    -- F1: decisión de descuento de saldo (la fija TTHH; el descuento numérico es F3/F4).
+    discount_decision TEXT NOT NULL DEFAULT 'pending'
+        CHECK(discount_decision IN ('pending','discount','waived')),
+    waived_by INTEGER,                -- user_id de TTHH que marcó 'justificado sin descuento'
+    waived_reason TEXT,               -- obligatorio a nivel app cuando discount=false
+    balance_marked_at TIMESTAMP,      -- sello del gancho "tras aprobación final → descontar" (F3/F4)
     requested_by INTEGER,
     approved_by INTEGER,
     approved_at TIMESTAMP,
@@ -467,12 +476,67 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
     FOREIGN KEY (requested_by) REFERENCES users (id),
-    FOREIGN KEY (approved_by) REFERENCES users (id)
+    FOREIGN KEY (approved_by) REFERENCES users (id),
+    FOREIGN KEY (waived_by) REFERENCES users (id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
 CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);
+
+-- ============================================================
+-- F1: FIRMA ELECTRÓNICA + APROBACIÓN MULTINIVEL + ADJUNTOS (ver sqlite.sql)
+-- ============================================================
+-- (A) Firma electrónica genérica por (entity_type, entity_id). content_hash =
+--     SHA-256 del payload SUSTANTIVO + identidad. UNIQUE: una firma por entidad.
+CREATE TABLE IF NOT EXISTS hr_signatures (
+    id SERIAL PRIMARY KEY,
+    entity_type TEXT NOT NULL CHECK(entity_type IN ('time_off_request','payroll_receipt','memo')),
+    entity_id INTEGER NOT NULL,
+    signer_user_id INTEGER NOT NULL,
+    signer_name TEXT NOT NULL,
+    signer_doc_id TEXT NOT NULL,
+    accepted BOOLEAN NOT NULL,
+    content_hash TEXT NOT NULL,
+    -- TIMESTAMPTZ (no TIMESTAMP) para que signed_at round-trip al MISMO instante
+    -- absoluto en ms: el hash de la firma incluye signed_at, y el coder lo
+    -- normaliza con new Date(x).toISOString() en ambos drivers. Con TIMESTAMP
+    -- (sin tz) el offset del servidor corrompería la verificación de integridad.
+    signed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(entity_type, entity_id),
+    FOREIGN KEY (signer_user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_signatures_signer ON hr_signatures(signer_user_id);
+
+-- (B) Historial inmutable de pasos del workflow multinivel (append-only).
+CREATE TABLE IF NOT EXISTS hr_approval_steps (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL,
+    step_order INTEGER NOT NULL,
+    step_level TEXT NOT NULL CHECK(step_level IN ('jefe','tthh')),
+    approver_user_id INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('approve','reject')),
+    comment TEXT,
+    acted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES time_off_requests (id) ON DELETE CASCADE,
+    FOREIGN KEY (approver_user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_approval_steps_req ON hr_approval_steps(request_id, step_order);
+
+-- (C) Justificativos en filesystem (storage_key), NO BLOB. MÚLTIPLES por solicitud.
+CREATE TABLE IF NOT EXISTS hr_request_attachments (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL,
+    storage_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    file_size INTEGER,
+    uploaded_by INTEGER,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES time_off_requests (id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_request_attachments_req ON hr_request_attachments(request_id);
 
 -- ============================================================
 -- PR-3d: MEMOS / COMUNICADOS A EMPLEADOS (historial inmutable)

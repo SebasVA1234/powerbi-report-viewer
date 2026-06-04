@@ -523,8 +523,13 @@ CREATE INDEX IF NOT EXISTS idx_holiday_attendance_hol ON holiday_attendance(holi
 --     feriado_compensado, permiso_personal, enfermedad).
 --   * Si tipo='feriado_compensado', al APROBARSE descuenta del banco.
 --   * Aprobación pendiente: jefe directo (o RRHH/Gerencia).
--- Workflow: pending → approved | rejected | cancelled.
--- approved_by registra quién lo aprobó (auditoría).
+-- Workflow F1 (multinivel): SÓLO 'vacaciones' pasa por el jefe
+--   crear → pending_jefe (vacaciones) | pending_tthh (resto)
+--   pending_jefe → pending_tthh (jefe aprueba) | rejected | cancelled
+--   pending_tthh → approved (TTHH aprueba; recién aquí se marca descuento) | rejected | cancelled
+-- 'pending' se conserva SOLO por compatibilidad con filas históricas (PR-3c).
+-- approved_by/approved_at reflejan la decisión FINAL de TTHH; el detalle
+-- multinivel vive en hr_approval_steps (append-only).
 CREATE TABLE IF NOT EXISTS time_off_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL,
@@ -535,7 +540,13 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
     days_count REAL NOT NULL,         -- días calendario solicitados
     reason TEXT,
     status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending','approved','rejected','cancelled')),
+        CHECK(status IN ('pending','pending_jefe','pending_tthh','approved','rejected','cancelled')),
+    -- F1: decisión de descuento de saldo (la fija TTHH; el descuento numérico es F3/F4).
+    discount_decision TEXT NOT NULL DEFAULT 'pending'
+        CHECK(discount_decision IN ('pending','discount','waived')),
+    waived_by INTEGER,                -- user_id de TTHH que marcó 'justificado sin descuento'
+    waived_reason TEXT,               -- obligatorio a nivel app cuando discount=false
+    balance_marked_at DATETIME,       -- sello del gancho "tras aprobación final → descontar" (F3/F4)
     requested_by INTEGER,             -- user_id de quien lo creó (puede ser admin/rrhh por el empleado)
     approved_by INTEGER,
     approved_at DATETIME,
@@ -544,12 +555,71 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE,
     FOREIGN KEY (requested_by) REFERENCES users (id),
-    FOREIGN KEY (approved_by) REFERENCES users (id)
+    FOREIGN KEY (approved_by) REFERENCES users (id),
+    FOREIGN KEY (waived_by) REFERENCES users (id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_time_off_status ON time_off_requests(status);
 CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(date_from, date_to);
+
+-- ============================================================
+-- F1: FIRMA ELECTRÓNICA + APROBACIÓN MULTINIVEL + ADJUNTOS
+-- ============================================================
+-- (A) Firma electrónica genérica, vinculada por (entity_type, entity_id) para
+--     reuso futuro en roles de pago (M2) y memos (M5). content_hash = SHA-256
+--     del payload SUSTANTIVO de la solicitud + identidad del firmante (mismo
+--     espíritu que hr_memos.content_hash). UNIQUE(entity_type, entity_id):
+--     una firma vigente por entidad.
+CREATE TABLE IF NOT EXISTS hr_signatures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK(entity_type IN ('time_off_request','payroll_receipt','memo')),
+    entity_id INTEGER NOT NULL,
+    signer_user_id INTEGER NOT NULL,
+    signer_name TEXT NOT NULL,        -- MAYÚSCULAS, validado === hr_employees.full_name
+    signer_doc_id TEXT NOT NULL,      -- cédula; se OMITE al leer a quien no sea dueño/hr.read.all/admin
+    accepted INTEGER NOT NULL,        -- 1 = checkbox aceptado
+    content_hash TEXT NOT NULL,       -- SHA-256 hex del payload firmado sustantivo + identidad
+    signed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(entity_type, entity_id),
+    FOREIGN KEY (signer_user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_signatures_signer ON hr_signatures(signer_user_id);
+
+-- (B) Historial inmutable de pasos del workflow multinivel. Append-only:
+--     nunca UPDATE/DELETE. Reemplaza el approved_by único como fuente de
+--     verdad de auditoría. step_order: 1=jefe,2=tthh (vacaciones); 1=tthh
+--     (tipos RRHH-directos).
+CREATE TABLE IF NOT EXISTS hr_approval_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL,
+    step_order INTEGER NOT NULL,
+    step_level TEXT NOT NULL CHECK(step_level IN ('jefe','tthh')),
+    approver_user_id INTEGER NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('approve','reject')),
+    comment TEXT,                     -- obligatorio a nivel app en reject
+    acted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES time_off_requests (id) ON DELETE CASCADE,
+    FOREIGN KEY (approver_user_id) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_approval_steps_req ON hr_approval_steps(request_id, step_order);
+
+-- (C) Justificativos en filesystem (storage_key), NO BLOB (mismo patrón que
+--     documents/hr_documents). MÚLTIPLES adjuntos por solicitud: acumulan, no
+--     reemplazan → índice NO único.
+CREATE TABLE IF NOT EXISTS hr_request_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL,
+    storage_key TEXT NOT NULL,        -- random; resuelto por config/storage.js
+    file_name TEXT NOT NULL,          -- nombre original
+    mime_type TEXT NOT NULL,          -- application/pdf | image/png | image/jpeg
+    file_size INTEGER,
+    uploaded_by INTEGER,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES time_off_requests (id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users (id)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_request_attachments_req ON hr_request_attachments(request_id);
 
 -- ============================================================
 -- PR-3d: MEMOS / COMUNICADOS A EMPLEADOS (historial inmutable)

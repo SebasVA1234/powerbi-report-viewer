@@ -20,8 +20,87 @@
  * el listado masivo; solo en getEmployeeById si el caller tiene
  * 'hr.read.all' o es el propio user.
  */
+const crypto = require('crypto');
 const db = require('../config/db');
+const storage = require('../config/storage');
 const { getUserContext } = require('./rbac.controller');
+
+// ============================================================
+// F1: constantes y helpers compartidos (firma + workflow + adjuntos)
+// ============================================================
+
+// entity_type de hr_signatures para una solicitud de tiempo libre. Genérico a
+// propósito: M2/Nómina (payroll_receipt) y M5/Memos (memo) reusarán la tabla.
+const SIGNATURE_ENTITY_TYPE = 'time_off_request';
+
+// Tipos de solicitud que descuentan vacaciones/días-ley → admiten el override
+// "justificado sin descuento" (waive). 'feriado_compensado' NO está: su saldo es
+// el banco de días compensados, que no tiene semántica de waive (discount=false
+// sobre ese tipo se rechaza con 400).
+const WAIVABLE_TYPES = ['vacaciones', 'permiso_personal', 'enfermedad', 'otro'];
+
+// Tipos cuyo justificativo es obligatorio (por ley); mientras falte, la
+// solicitud queda "para descuento" por defecto (discount_decision='pending').
+const ATTACHMENT_REQUIRED_TYPES = ['permiso_personal', 'enfermedad'];
+
+// MIME types aceptados para adjuntos (PDF + imágenes).
+const ALLOWED_ATTACHMENT_MIME = ['application/pdf', 'image/png', 'image/jpeg'];
+
+// Calcula el content_hash de la firma sobre la cadena canónica EXACTA del
+// hash_input de la spec. ATA el payload SUSTANTIVO de la solicitud (tipo,
+// fechas, días, motivo) ADEMÁS de la identidad del firmante. Orden y separador
+// fijos (separador = '|', sin espacios). Recomputar sobre los valores ACTUALES
+// en DB detecta cualquier tamper de fechas/días/motivo (signature_integrity).
+//
+//   entity_type|entity_id|request_type|date_from|date_to|days_count|reason|signer_user_id|signer_name|signer_doc_id|signed_at
+//
+// Normaliza signed_at a una cadena ISO-8601 UTC canónica. CRÍTICO para el
+// dual-driver: SQLite devuelve el signed_at como el MISMO string que insertamos,
+// pero el driver de Postgres lo devuelve como objeto Date. Si el hash usara el
+// valor crudo, recomputar en Postgres daría una cadena distinta y
+// signature_integrity sería SIEMPRE false. Pasar ambos (string y Date) por
+// `new Date(x).toISOString()` los colapsa al mismo instante absoluto en ms
+// (por eso la columna signed_at de hr_signatures es TIMESTAMPTZ en Postgres).
+function canonicalSignedAt(value) {
+    return new Date(value).toISOString();
+}
+
+// Normaliza una fecha (columna DATE) a 'YYYY-MM-DD'. Otro punto dual-driver:
+// SQLite devuelve DATE como string 'YYYY-MM-DD' (igual que lo insertamos), pero
+// Postgres lo devuelve como objeto Date a medianoche local. Si es string,
+// tomamos los primeros 10 chars; si es Date, usamos sus componentes LOCALES
+// (que reflejan la fecha de calendario que Postgres devolvió), evitando el
+// corrimiento de día que daría toISOString() en zonas con offset negativo.
+function canonicalDate(value) {
+    if (value instanceof Date) {
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return String(value).slice(0, 10);
+}
+
+// Notas de canonicalización (para que la verificación recompute idéntico):
+//   - days_count se serializa con String(Number(...)) → punto decimal, sin ceros sobrantes.
+//   - reason null/undefined → cadena vacía.
+//   - signed_at se normaliza a ISO-8601 UTC (ver canonicalSignedAt) en ambos lados.
+function computeSignatureHash(parts) {
+    const canonical = [
+        SIGNATURE_ENTITY_TYPE,
+        parts.entity_id,
+        parts.request_type,
+        canonicalDate(parts.date_from),
+        canonicalDate(parts.date_to),
+        String(Number(parts.days_count)),
+        parts.reason == null ? '' : String(parts.reason),
+        parts.signer_user_id,
+        parts.signer_name,
+        parts.signer_doc_id,
+        canonicalSignedAt(parts.signed_at)
+    ].join('|');
+    return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
 
 // Devuelve los IDs de empleados visibles para el user.
 // Si el user puede ver TODO, devuelve null (caller debe ignorar el filtro).
@@ -546,13 +625,18 @@ class HrController {
                 WHERE employee_id = ?
             `, [id]);
 
-            // PR-3c: descontar solicitudes aprobadas de tipo 'feriado_compensado'.
+            // PR-3c: descontar solicitudes de tipo 'feriado_compensado' que
+            // gastan del banco. F1 (regresión doble-gasto): cuenta también los
+            // estados intermedios del workflow multinivel. Una solicitud EN VUELO
+            // (que nace en 'pending_tthh' para feriado_compensado) debe seguir
+            // restando del disponible aunque TTHH todavía no la apruebe; si no,
+            // el empleado podría gastar dos veces el mismo crédito.
             const usedRow = await db.queryOne(`
                 SELECT COALESCE(SUM(days_count), 0) AS total
                 FROM time_off_requests
                 WHERE employee_id = ?
                   AND request_type = 'feriado_compensado'
-                  AND status = 'approved'
+                  AND status IN ('approved','pending','pending_jefe','pending_tthh')
             `, [id]);
             const used = Number(usedRow.total || 0);
             const accrued = Number(credit.total || 0);
@@ -692,7 +776,7 @@ class HrController {
                     FROM time_off_requests
                     WHERE employee_id = ?
                       AND request_type = 'feriado_compensado'
-                      AND status IN ('approved','pending')
+                      AND status IN ('approved','pending','pending_jefe','pending_tthh')
                 `, [targetEmpId]);
                 const balance = Number(credit.total || 0) - Number(usedApproved.total || 0);
                 if (Number(days_count) > balance) {
@@ -703,13 +787,16 @@ class HrController {
                 }
             }
 
+            // F1: el status se DERIVA server-side del tipo (el cliente nunca lo
+            // envía). SÓLO 'vacaciones' pasa por el jefe; el resto es RRHH-directo.
+            const initialStatus = HrController.deriveInitialStatus(request_type);
             const r = await db.execute(
                 `INSERT INTO time_off_requests
-                 (employee_id, request_type, date_from, date_to, days_count, reason, requested_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [targetEmpId, request_type, date_from, date_to, days_count, reason || null, req.user.id]
+                 (employee_id, request_type, date_from, date_to, days_count, reason, status, requested_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [targetEmpId, request_type, date_from, date_to, days_count, reason || null, initialStatus, req.user.id]
             );
-            res.status(201).json({ success: true, data: { id: r.lastInsertId } });
+            res.status(201).json({ success: true, data: { id: r.lastInsertId, status: initialStatus } });
         } catch (err) {
             console.error('createTimeOffRequest:', err);
             res.status(500).json({ success: false, message: 'Error al crear solicitud' });
@@ -767,7 +854,11 @@ class HrController {
         }
     }
 
-    // El propio solicitante puede cancelar su solicitud si está pending.
+    // El dueño (o RRHH/admin) cancela su solicitud mientras siga PENDIENTE.
+    // F1: el guard se amplió de `=== 'pending'` al conjunto pendiente del
+    // workflow multinivel (una solicitud nueva nace en pending_jefe/pending_tthh
+    // y jamás en 'pending'), y el código de error pasó de 400 a 409 (conflicto
+    // de estado, coherente con el resto del workflow).
     static async cancelTimeOffRequest(req, res) {
         try {
             const { id } = req.params;
@@ -778,17 +869,21 @@ class HrController {
                 WHERE r.id = ?
             `, [id]);
             if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
-            if (r.status !== 'pending') {
-                return res.status(400).json({
-                    success: false,
-                    message: `La solicitud ya está en estado '${r.status}'`
-                });
-            }
+
+            // La regla de owner se evalúa ANTES del estado: quien no es dueño ni
+            // RRHH/admin recibe 403 aunque la solicitud ya esté en estado terminal.
             const ctx = await getUserContext(req.user.id, req);
             const isOwner = r.owner_user_id === req.user.id;
             const canManage = ctx.isAdmin || ctx.permissions.has('hr.timeoff.approve');
             if (!isOwner && !canManage) {
                 return res.status(403).json({ success: false, message: 'Sin permisos para cancelar esta solicitud' });
+            }
+
+            if (!HrController.PENDING_STATUSES.includes(r.status)) {
+                return res.status(409).json({
+                    success: false,
+                    message: `La solicitud ya está en estado '${r.status}' y no puede cancelarse`
+                });
             }
             await db.execute(
                 `UPDATE time_off_requests
@@ -796,7 +891,13 @@ class HrController {
                  WHERE id = ?`,
                 [id]
             );
-            res.json({ success: true, message: 'Solicitud cancelada' });
+            // DecisionResponse: en cancel se omiten step_level/action (no es un
+            // paso de aprobador), sólo se devuelve el estado resultante.
+            res.json({
+                success: true,
+                message: 'Solicitud cancelada',
+                data: { id: Number(id), status: 'cancelled', action: 'cancel' }
+            });
         } catch (err) {
             console.error('cancelTimeOffRequest:', err);
             res.status(500).json({ success: false, message: 'Error al cancelar' });
@@ -875,6 +976,642 @@ class HrController {
         } catch (err) {
             console.error('updateEmployee:', err);
             res.status(500).json({ success: false, message: 'Error al actualizar empleado' });
+        }
+    }
+
+    // ============================================================
+    // F1: Firma electrónica + aprobación multinivel + adjuntos
+    // ============================================================
+
+    // Estados en los que una solicitud sigue "pendiente" (cancelable / accionable).
+    // 'pending' sólo aparece en filas históricas (PR-3c); las nuevas nacen en
+    // pending_jefe (vacaciones) o pending_tthh (resto).
+    static get PENDING_STATUSES() {
+        return ['pending', 'pending_jefe', 'pending_tthh'];
+    }
+
+    // Deriva el estado inicial server-side a partir del tipo (el cliente nunca
+    // lo envía). SÓLO 'vacaciones' pasa por el jefe; el resto es RRHH-directo.
+    static deriveInitialStatus(requestType) {
+        return requestType === 'vacaciones' ? 'pending_jefe' : 'pending_tthh';
+    }
+
+    // Resuelve quiénes pueden aprobar el PASO JEFE (sólo vacaciones) de una
+    // solicitud: el jefe inmediato (hr_employees.manager_id → su user_id) y,
+    // como fallback, los jefes del departamento del solicitante
+    // (user_departments.is_head=1). Cualquiera de varios heads sirve.
+    // Devuelve un Set<user_id>. El solicitante se EXCLUYE para bloquear
+    // auto-aprobación: un jefe que pide sus propias vacaciones y es su único
+    // aprobador-jefe no debe poder aprobarse a sí mismo (su solicitud, además,
+    // ya habrá nacido en pending_tthh — ver canRouteThroughJefe).
+    static async resolveJefeApproverUserIds(employee) {
+        const approverUserIds = new Set();
+
+        // 1. Jefe inmediato directo (manager_id → user_id del manager).
+        if (employee.manager_id) {
+            const manager = await db.queryOne(
+                'SELECT user_id FROM hr_employees WHERE id = ?',
+                [employee.manager_id]
+            );
+            if (manager && manager.user_id) approverUserIds.add(manager.user_id);
+        }
+
+        // 2. Fallback: jefes (is_head) del departamento del solicitante.
+        if (employee.department_id) {
+            const heads = await db.query(
+                'SELECT user_id FROM user_departments WHERE department_id = ? AND is_head = 1',
+                [employee.department_id]
+            );
+            for (const h of heads) {
+                if (h.user_id) approverUserIds.add(h.user_id);
+            }
+        }
+
+        // Bloqueo de auto-aprobación: el solicitante nunca es su propio aprobador-jefe.
+        if (employee.user_id) approverUserIds.delete(employee.user_id);
+
+        return approverUserIds;
+    }
+
+    // Decide si una solicitud de vacaciones DEBE pasar por el jefe. Si no hay
+    // ningún aprobador-jefe válido (sin manager y sin head distinto del propio
+    // solicitante), el paso jefe se salta y la solicitud va directo a TTHH.
+    static async canRouteThroughJefe(employee) {
+        const approvers = await HrController.resolveJefeApproverUserIds(employee);
+        return approvers.size > 0;
+    }
+
+    // POST /api/hr/time-off — crear y FIRMAR una solicitud en un solo paso.
+    // La firma se valida server-side (nombre exacto en mayúsculas, cédula
+    // numérica, checkbox true); si no valida → 422 y NO se crea nada (atómico).
+    // El estado inicial se deriva del tipo. El content_hash ata el payload
+    // sustantivo + identidad. Reusa la regla de createTimeOffRequest: un
+    // empleado sólo firma para sí mismo; RRHH/admin pueden crear por otro.
+    static async crearSolicitudFirmada(req, res) {
+        try {
+            const { employee_id, request_type, date_from, date_to, days_count, reason, signature } = req.body;
+
+            // ---- Validación de los campos de la solicitud (tipos/rangos) ----
+            const validTypes = ['vacaciones', 'feriado_compensado', 'permiso_personal', 'enfermedad', 'otro'];
+            if (!validTypes.includes(request_type)) {
+                return res.status(400).json({ success: false, message: `request_type inválido. Válidos: ${validTypes.join(', ')}` });
+            }
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date_from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(date_to || '')) {
+                return res.status(400).json({ success: false, message: 'date_from y date_to deben ser fechas YYYY-MM-DD' });
+            }
+            if (date_from > date_to) {
+                return res.status(400).json({ success: false, message: 'date_from no puede ser posterior a date_to' });
+            }
+            const days = Number(days_count);
+            if (!Number.isFinite(days) || days < 0.5 || days > 365) {
+                return res.status(400).json({ success: false, message: 'days_count debe estar entre 0.5 y 365' });
+            }
+            if (reason !== undefined && (typeof reason !== 'string' || reason.length > 1000)) {
+                return res.status(400).json({ success: false, message: 'reason debe ser texto de hasta 1000 caracteres' });
+            }
+
+            // ---- Validación estructural de la firma (forma) ----
+            if (!signature || typeof signature !== 'object') {
+                return res.status(400).json({ success: false, message: 'signature es obligatoria' });
+            }
+            const { accepted, signer_name, signer_doc_id } = signature;
+            if (typeof signer_name !== 'string' || typeof signer_doc_id !== 'string') {
+                return res.status(400).json({ success: false, message: 'signer_name y signer_doc_id son obligatorios' });
+            }
+
+            // ---- Resolver el empleado objetivo (mismo criterio que createTimeOffRequest) ----
+            const ctx = await getUserContext(req.user.id, req);
+            const canCreateForOthers = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+            let targetEmployee;
+            if (!employee_id) {
+                targetEmployee = await db.queryOne('SELECT * FROM hr_employees WHERE user_id = ?', [req.user.id]);
+                if (!targetEmployee) {
+                    return res.status(400).json({ success: false, message: 'No tienes perfil de empleado. Pedí a RRHH que te lo cree.' });
+                }
+            } else {
+                targetEmployee = await db.queryOne('SELECT * FROM hr_employees WHERE id = ?', [employee_id]);
+                if (!targetEmployee) {
+                    return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+                }
+                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+                const isSelf = me && me.id === Number(employee_id);
+                if (!isSelf && !canCreateForOthers) {
+                    return res.status(403).json({ success: false, message: 'Solo podés solicitar días libres para vos mismo.' });
+                }
+            }
+
+            // Defensa: firmar electrónicamente exige una identidad de login. Un
+            // empleado sólo-ficha (sin user_id vinculado) no puede ser firmante →
+            // 422 limpio en vez de un 500 por la FK NOT NULL de hr_signatures.signer_user_id.
+            if (targetEmployee.user_id == null) {
+                return res.status(422).json({ success: false, message: 'El empleado no tiene cuenta de usuario; no puede firmarse en su nombre' });
+            }
+
+            // ---- Validación SUSTANTIVA de la firma (semántica) → 422 si falla ----
+            // accepted debe ser exactamente true; el nombre tecleado debe coincidir
+            // con full_name del empleado tras normalizar a mayúsculas; la cédula
+            // debe ser numérica (6-13 dígitos). Cualquier incumplimiento: 422 y la
+            // entidad NO se crea.
+            if (accepted !== true) {
+                return res.status(422).json({ success: false, message: 'Debés aceptar los términos para firmar (checkbox)' });
+            }
+            if (!/^[0-9]{6,13}$/.test(signer_doc_id)) {
+                return res.status(422).json({ success: false, message: 'La cédula de la firma debe ser numérica (6 a 13 dígitos)' });
+            }
+            const fullNameUpper = String(targetEmployee.full_name || '').trim().toUpperCase();
+            if (signer_name.trim().toUpperCase() !== fullNameUpper) {
+                return res.status(422).json({ success: false, message: 'El nombre firmado no coincide con el nombre del empleado' });
+            }
+
+            // ---- Saldo del banco (mismo guard que createTimeOffRequest, en vuelo ampliado) ----
+            if (request_type === 'feriado_compensado') {
+                const credit = await db.queryOne(
+                    'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
+                    [targetEmployee.id]
+                );
+                const used = await db.queryOne(`
+                    SELECT COALESCE(SUM(days_count), 0) AS total
+                    FROM time_off_requests
+                    WHERE employee_id = ?
+                      AND request_type = 'feriado_compensado'
+                      AND status IN ('approved','pending','pending_jefe','pending_tthh')
+                `, [targetEmployee.id]);
+                const balance = Number(credit.total || 0) - Number(used.total || 0);
+                if (days > balance) {
+                    return res.status(400).json({ success: false, message: `Saldo insuficiente. Disponible: ${balance} día(s), pediste ${days}.` });
+                }
+            }
+
+            // ---- Derivar estado inicial: vacaciones → jefe SÓLO si hay aprobador-jefe ----
+            let initialStatus = HrController.deriveInitialStatus(request_type);
+            if (initialStatus === 'pending_jefe') {
+                const routesThroughJefe = await HrController.canRouteThroughJefe(targetEmployee);
+                if (!routesThroughJefe) initialStatus = 'pending_tthh'; // sin jefe válido → RRHH cubre
+            }
+
+            const requiresAttachment = ATTACHMENT_REQUIRED_TYPES.includes(request_type);
+            const normalizedName = signer_name.trim().toUpperCase();
+            const reasonValue = (typeof reason === 'string' && reason.length > 0) ? reason : null;
+
+            // ---- Persistir solicitud + firma ATÓMICAMENTE ----
+            // La firma necesita el id de la solicitud para el hash (entity_id),
+            // así que insertamos la solicitud, calculamos el hash y luego la firma
+            // dentro de la misma transacción. Si algo falla, rollback total.
+            const result = await db.transaction(async (tx) => {
+                const reqInsert = await tx.execute(
+                    `INSERT INTO time_off_requests
+                     (employee_id, request_type, date_from, date_to, days_count, reason, status, discount_decision, requested_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                    [targetEmployee.id, request_type, date_from, date_to, days, reasonValue, initialStatus, req.user.id]
+                );
+                const requestId = reqInsert.lastInsertId;
+
+                // signed_at lo fija la app (no CURRENT_TIMESTAMP) porque entra en
+                // el hash y necesitamos el MISMO valor exacto al recomputar.
+                const signedAt = new Date().toISOString();
+                const contentHash = computeSignatureHash({
+                    entity_id: requestId,
+                    request_type,
+                    date_from,
+                    date_to,
+                    days_count: days,
+                    reason: reasonValue,
+                    signer_user_id: targetEmployee.user_id,
+                    signer_name: normalizedName,
+                    signer_doc_id,
+                    signed_at: signedAt
+                });
+
+                // accepted es BOOLEAN en Postgres e INTEGER 0/1 en SQLite:
+                // valor driver-aware para no depender de coerciones implícitas.
+                const acceptedValue = db.driver === 'postgres' ? true : 1;
+                await tx.execute(
+                    `INSERT INTO hr_signatures
+                     (entity_type, entity_id, signer_user_id, signer_name, signer_doc_id, accepted, content_hash, signed_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [SIGNATURE_ENTITY_TYPE, requestId, targetEmployee.user_id, normalizedName, signer_doc_id, acceptedValue, contentHash, signedAt]
+                );
+
+                return { requestId, contentHash, signedAt };
+            });
+
+            return res.status(201).json({
+                success: true,
+                message: 'Solicitud creada y firmada',
+                data: {
+                    id: result.requestId,
+                    status: initialStatus,
+                    request_type,
+                    requires_attachment: requiresAttachment,
+                    discount_decision: 'pending',
+                    content_hash: result.contentHash,
+                    signed_at: result.signedAt
+                }
+            });
+        } catch (err) {
+            console.error('crearSolicitudFirmada:', err);
+            res.status(500).json({ success: false, message: 'Error al crear la solicitud firmada' });
+        }
+    }
+
+    // POST /api/hr/time-off/:id/attachment — adjunta un justificativo al
+    // filesystem (storage_key, NO BLOB). Sólo el dueño (o RRHH/admin) y sólo
+    // mientras la solicitud siga pendiente. Múltiples adjuntos acumulan.
+    // El archivo ya viene validado por multer (tamaño/tipo) → req.file.
+    static async subirJustificativo(req, res) {
+        try {
+            const { id } = req.params;
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({ success: false, message: 'No se recibió ningún archivo (campo "file")' });
+            }
+            // Doble validación de MIME (defensa en profundidad; multer ya filtró).
+            if (!ALLOWED_ATTACHMENT_MIME.includes(file.mimetype)) {
+                return res.status(415).json({ success: false, message: 'Tipo de archivo no permitido (solo PDF/PNG/JPEG)' });
+            }
+
+            const reqRow = await db.queryOne(`
+                SELECT r.id, r.status, r.discount_decision, e.user_id AS owner_user_id
+                FROM time_off_requests r
+                JOIN hr_employees e ON e.id = r.employee_id
+                WHERE r.id = ?
+            `, [id]);
+            if (!reqRow) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+
+            // Autorización: dueño o RRHH/admin.
+            const ctx = await getUserContext(req.user.id, req);
+            const isOwner = reqRow.owner_user_id === req.user.id;
+            const canManage = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+            if (!isOwner && !canManage) {
+                return res.status(403).json({ success: false, message: 'Sin permisos para adjuntar a esta solicitud' });
+            }
+
+            // Sólo se adjunta mientras la solicitud sigue pendiente.
+            if (!HrController.PENDING_STATUSES.includes(reqRow.status)) {
+                return res.status(409).json({ success: false, message: `No se puede adjuntar: la solicitud está en estado '${reqRow.status}'` });
+            }
+
+            // Persistir al volumen y registrar metadatos (NO BLOB en DB).
+            const storageKey = storage.newStorageKey(file.originalname);
+            storage.writeBufferToStorage(storageKey, file.buffer);
+
+            const ins = await db.execute(
+                `INSERT INTO hr_request_attachments
+                 (request_id, storage_key, file_name, mime_type, file_size, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [reqRow.id, storageKey, file.originalname, file.mimetype, file.size, req.user.id]
+            );
+
+            return res.status(201).json({
+                success: true,
+                message: 'Justificativo guardado',
+                data: {
+                    id: ins.lastInsertId,
+                    request_id: reqRow.id,
+                    file_name: file.originalname,
+                    mime_type: file.mimetype,
+                    file_size: file.size,
+                    discount_decision: reqRow.discount_decision
+                }
+            });
+        } catch (err) {
+            console.error('subirJustificativo:', err);
+            res.status(500).json({ success: false, message: 'Error al guardar el justificativo' });
+        }
+    }
+
+    // POST /api/hr/time-off/:id/approve — aprueba en el nivel que corresponde
+    // al actor (resuelto server-side por estado + relación). Delega en el helper
+    // compartido con reject.
+    static async aprobarSolicitud(req, res) {
+        return HrController._decideTimeOff(req, res, 'approve');
+    }
+
+    // POST /api/hr/time-off/:id/reject — rechaza (comentario obligatorio).
+    static async rechazarSolicitud(req, res) {
+        return HrController._decideTimeOff(req, res, 'reject');
+    }
+
+    // Lógica compartida approve/reject. El NIVEL se decide server-side:
+    //   - pending_jefe (sólo vacaciones): el actor debe ser jefe del solicitante
+    //     (manager_id o is_head del depto). Approve → pending_tthh. Reject → rejected.
+    //   - pending_tthh: el actor debe ser TTHH (rol rrhh/gerencia/admin; el guard
+    //     de ruta ya exige hr.timeoff.approve). Approve → approved + marca descuento.
+    // Orden forzado: TTHH no puede aprobar una vacación que sigue en pending_jefe → 409.
+    static async _decideTimeOff(req, res, action) {
+        try {
+            const { id } = req.params;
+            const comment = req.body && typeof req.body.comment === 'string' ? req.body.comment : null;
+
+            // Reject exige comentario (3-1000 chars).
+            if (action === 'reject') {
+                if (!comment || comment.trim().length < 3 || comment.length > 1000) {
+                    return res.status(400).json({ success: false, message: 'El comentario del rechazo es obligatorio (3 a 1000 caracteres)' });
+                }
+            } else if (comment !== null && comment.length > 1000) {
+                return res.status(400).json({ success: false, message: 'El comentario no puede superar 1000 caracteres' });
+            }
+
+            // Se traen tanto user_id (lo usa resolveJefeApproverUserIds para la
+            // exclusión de auto-aprobación) como owner_user_id (alias explícito
+            // que dejan claro los chequeos de dueño). Son la misma columna.
+            const reqRow = await db.queryOne(`
+                SELECT r.id, r.status, r.request_type, r.employee_id, r.discount_decision,
+                       e.user_id, e.user_id AS owner_user_id, e.manager_id, e.department_id, e.full_name
+                FROM time_off_requests r
+                JOIN hr_employees e ON e.id = r.employee_id
+                WHERE r.id = ?
+            `, [id]);
+            if (!reqRow) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+
+            const ctx = await getUserContext(req.user.id, req);
+            // "TTHH" = quien decide el paso de RRHH: admin o el permiso de aprobación
+            // a nivel RRHH. El permiso hr.timeoff.approve lo tienen también los jefes
+            // de área por seed, por eso el paso TTHH exige ADEMÁS no depender sólo de
+            // ser jefe: usamos hr.read.all (lo tiene rrhh/gerencia/admin) como marca
+            // de "rol RRHH/gerencia", coherente con canCreateForOthers del módulo.
+            const isTthh = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+
+            if (reqRow.status === 'pending_jefe') {
+                // Paso JEFE (sólo ocurre en vacaciones). Autorización POR DATOS:
+                // el actor debe ser jefe del solicitante. TTHH no puede saltarse
+                // el orden aquí: si es una vacación aún en pending_jefe, el paso
+                // TTHH todavía no aplica → 409 (orden forzado), salvo que el actor
+                // sea efectivamente el jefe.
+                const jefeApprovers = await HrController.resolveJefeApproverUserIds(reqRow);
+                const isJefe = jefeApprovers.has(req.user.id);
+                if (!isJefe) {
+                    // Si quien intenta es TTHH (no jefe), el conflicto es de ORDEN:
+                    // debe esperar a que el jefe actúe primero → 409. Si no es ni
+                    // jefe ni TTHH, es falta de relación → 403.
+                    if (isTthh) {
+                        return res.status(409).json({ success: false, message: 'El jefe inmediato debe aprobar antes que TTHH (orden forzado)' });
+                    }
+                    return res.status(403).json({ success: false, message: 'No sos el jefe del solicitante para esta aprobación' });
+                }
+                return HrController._applyDecision(res, reqRow, 'jefe', action, comment, req.user.id);
+            }
+
+            if (reqRow.status === 'pending_tthh') {
+                // Paso TTHH. Exige rol RRHH/gerencia/admin (no basta ser jefe de otro área).
+                if (!isTthh) {
+                    return res.status(403).json({ success: false, message: 'Solo TTHH (RRHH/Gerencia) puede aprobar en este nivel' });
+                }
+                return HrController._applyDecision(res, reqRow, 'tthh', action, comment, req.user.id);
+            }
+
+            // Estado terminal o 'pending' histórico → no hay paso pendiente del actor.
+            return res.status(409).json({ success: false, message: `La solicitud ya está en estado '${reqRow.status}' y no admite esta acción` });
+        } catch (err) {
+            console.error('_decideTimeOff:', err);
+            res.status(500).json({ success: false, message: 'Error al procesar la decisión' });
+        }
+    }
+
+    // Aplica la transición de approve/reject de forma atómica: actualiza la
+    // solicitud, registra el paso inmutable en hr_approval_steps y (sólo en la
+    // aprobación FINAL de TTHH) sella balance_marked_at + fija discount_decision.
+    static async _applyDecision(res, reqRow, level, action, comment, actorUserId) {
+        // step_order: 1=jefe; para tthh es 2 si la vacación pasó por el jefe, 1 si
+        // nació RRHH-directa. Lo derivamos contando pasos previos de la solicitud.
+        const prev = await db.queryOne(
+            'SELECT COUNT(*) AS c FROM hr_approval_steps WHERE request_id = ?',
+            [reqRow.id]
+        );
+        const stepOrder = Number(prev.c || 0) + 1;
+
+        let newStatus;
+        let balanceMarked = false;
+
+        if (action === 'reject') {
+            newStatus = 'rejected';
+        } else if (level === 'jefe') {
+            newStatus = 'pending_tthh'; // el jefe aprobó → ahora decide TTHH
+        } else {
+            newStatus = 'approved';     // aprobación FINAL de TTHH
+            balanceMarked = true;
+        }
+
+        await db.transaction(async (tx) => {
+            if (action === 'reject') {
+                await tx.execute(
+                    `UPDATE time_off_requests
+                     SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                         rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?`,
+                    [actorUserId, comment, reqRow.id]
+                );
+            } else if (level === 'jefe') {
+                await tx.execute(
+                    `UPDATE time_off_requests
+                     SET status = 'pending_tthh', updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?`,
+                    [reqRow.id]
+                );
+            } else {
+                // Aprobación final de TTHH. Si la decisión de descuento sigue en
+                // 'pending', la fijamos en 'discount' por defecto (TTHH puede luego
+                // hacer waive vía /discount-decision). balance_marked_at es el
+                // gancho que F3/F4 leerá para ejecutar el descuento numérico.
+                const nextDiscount = reqRow.discount_decision === 'pending' ? 'discount' : reqRow.discount_decision;
+                await tx.execute(
+                    `UPDATE time_off_requests
+                     SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                         discount_decision = ?, balance_marked_at = CURRENT_TIMESTAMP,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?`,
+                    [actorUserId, nextDiscount, reqRow.id]
+                );
+            }
+
+            await tx.execute(
+                `INSERT INTO hr_approval_steps
+                 (request_id, step_order, step_level, approver_user_id, action, comment)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [reqRow.id, stepOrder, level, actorUserId, action, comment]
+            );
+        });
+
+        return res.json({
+            success: true,
+            message: action === 'approve' ? 'Solicitud aprobada' : 'Solicitud rechazada',
+            data: {
+                id: reqRow.id,
+                status: newStatus,
+                step_level: level,
+                action,
+                balance_marked_for_discount: balanceMarked
+            }
+        });
+    }
+
+    // POST /api/hr/time-off/:id/discount-decision — decisión EXCLUSIVA de TTHH
+    // sobre si la solicitud descuenta saldo. El guard de ruta exige el permiso
+    // nuevo hr.timeoff.waive_discount. waive (discount=false) sólo aplica a
+    // tipos que descuentan vacaciones/días-ley; sobre feriado_compensado → 400.
+    static async decidirDescuento(req, res) {
+        try {
+            const { id } = req.params;
+            const { discount, reason } = req.body || {};
+
+            if (typeof discount !== 'boolean') {
+                return res.status(400).json({ success: false, message: 'discount (boolean) es obligatorio' });
+            }
+            // reason obligatorio cuando NO descuenta (waive).
+            if (discount === false) {
+                if (typeof reason !== 'string' || reason.trim().length < 3 || reason.length > 1000) {
+                    return res.status(400).json({ success: false, message: 'reason es obligatorio (3 a 1000 caracteres) cuando discount=false' });
+                }
+            }
+
+            const reqRow = await db.queryOne(
+                'SELECT id, status, request_type FROM time_off_requests WHERE id = ?',
+                [id]
+            );
+            if (!reqRow) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+
+            // waive sobre feriado_compensado no tiene semántica (su saldo es el banco).
+            if (discount === false && !WAIVABLE_TYPES.includes(reqRow.request_type)) {
+                return res.status(400).json({ success: false, message: `El tipo '${reqRow.request_type}' no admite "justificado sin descuento"` });
+            }
+
+            // Sólo aplicable cuando está aprobada o pendiente de TTHH; sobre
+            // rejected/cancelled (o aún en pending_jefe) → 409.
+            if (!['approved', 'pending_tthh'].includes(reqRow.status)) {
+                return res.status(409).json({ success: false, message: `No se puede decidir el descuento con la solicitud en estado '${reqRow.status}'` });
+            }
+
+            const newDecision = discount ? 'discount' : 'waived';
+            const waivedBy = discount ? null : req.user.id;
+            const waivedReason = discount ? null : reason;
+
+            await db.execute(
+                `UPDATE time_off_requests
+                 SET discount_decision = ?, waived_by = ?, waived_reason = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`,
+                [newDecision, waivedBy, waivedReason, id]
+            );
+
+            return res.json({
+                success: true,
+                message: 'Decisión de descuento registrada',
+                data: {
+                    id: Number(id),
+                    discount_decision: newDecision,
+                    waived_by: waivedBy,
+                    waived_reason: waivedReason
+                }
+            });
+        } catch (err) {
+            console.error('decidirDescuento:', err);
+            res.status(500).json({ success: false, message: 'Error al registrar la decisión de descuento' });
+        }
+    }
+
+    // GET /api/hr/time-off/:id/approval-history — trazabilidad completa:
+    // pasos del workflow + firma (con verificación de integridad) + decisión de
+    // descuento + metadatos de adjuntos. Visibilidad: mismo modelo que
+    // listTimeOffRequests (own/team/all); fuera de scope → 404. La cédula del
+    // firmante se OMITE a quien no sea dueño/hr.read.all/admin.
+    static async obtenerHistorialAprobacion(req, res) {
+        try {
+            const { id } = req.params;
+
+            const reqRow = await db.queryOne(`
+                SELECT r.id, r.employee_id, r.request_type, r.status, r.discount_decision,
+                       r.date_from, r.date_to, r.days_count, r.reason,
+                       r.waived_by, r.waived_reason,
+                       e.user_id AS owner_user_id
+                FROM time_off_requests r
+                JOIN hr_employees e ON e.id = r.employee_id
+                WHERE r.id = ?
+            `, [id]);
+            if (!reqRow) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
+
+            // Visibilidad: own/team/all. Fuera de scope → 404 (no revelar existencia).
+            const visibleIds = await getVisibleEmployeeIds(req.user.id);
+            if (visibleIds !== null && !visibleIds.includes(reqRow.employee_id)) {
+                return res.status(404).json({ success: false, message: 'Solicitud no encontrada o sin permisos' });
+            }
+
+            const ctx = await getUserContext(req.user.id, req);
+            const isOwner = reqRow.owner_user_id === req.user.id;
+            const canSeeDocId = isOwner || ctx.isAdmin || ctx.permissions.has('hr.read.all');
+
+            // ---- Firma + verificación de integridad ----
+            const sigRow = await db.queryOne(
+                `SELECT signer_user_id, signer_name, signer_doc_id, accepted, content_hash, signed_at
+                 FROM hr_signatures WHERE entity_type = ? AND entity_id = ?`,
+                [SIGNATURE_ENTITY_TYPE, reqRow.id]
+            );
+            let signature = null;
+            if (sigRow) {
+                // Recomputar el hash sobre el payload SUSTANTIVO ACTUAL de la
+                // solicitud + identidad. Si alguien tocó fechas/días/motivo en DB,
+                // no coincidirá → signature_integrity=false (tamper detectado).
+                const recomputed = computeSignatureHash({
+                    entity_id: reqRow.id,
+                    request_type: reqRow.request_type,
+                    date_from: reqRow.date_from,
+                    date_to: reqRow.date_to,
+                    days_count: reqRow.days_count,
+                    reason: reqRow.reason,
+                    signer_user_id: sigRow.signer_user_id,
+                    signer_name: sigRow.signer_name,
+                    signer_doc_id: sigRow.signer_doc_id,
+                    signed_at: sigRow.signed_at
+                });
+                signature = {
+                    signer_user_id: sigRow.signer_user_id,
+                    signer_name: sigRow.signer_name,
+                    accepted: !!sigRow.accepted,
+                    content_hash: sigRow.content_hash,
+                    signature_integrity: recomputed === sigRow.content_hash,
+                    signed_at: sigRow.signed_at
+                };
+                // Cédula: presente SÓLO para dueño/hr.read.all/admin; OMITIDA (no
+                // enmascarada) para el resto — mismo criterio que delete employee.doc_id.
+                if (canSeeDocId) signature.signer_doc_id = sigRow.signer_doc_id;
+            }
+
+            // ---- Pasos del workflow (orden cronológico) ----
+            const steps = await db.query(`
+                SELECT s.id, s.step_order, s.step_level, s.approver_user_id, s.action, s.comment, s.acted_at,
+                       u.full_name AS approver_name
+                FROM hr_approval_steps s
+                LEFT JOIN users u ON u.id = s.approver_user_id
+                WHERE s.request_id = ?
+                ORDER BY s.step_order ASC, s.acted_at ASC
+            `, [reqRow.id]);
+
+            // ---- Adjuntos (metadatos, sin binario) ----
+            const attachments = await db.query(`
+                SELECT id, file_name, mime_type, file_size, uploaded_by, uploaded_at
+                FROM hr_request_attachments
+                WHERE request_id = ?
+                ORDER BY uploaded_at ASC
+            `, [reqRow.id]);
+
+            return res.json({
+                success: true,
+                data: {
+                    request: {
+                        id: reqRow.id,
+                        employee_id: reqRow.employee_id,
+                        request_type: reqRow.request_type,
+                        status: reqRow.status,
+                        discount_decision: reqRow.discount_decision,
+                        waived_by: reqRow.waived_by != null ? reqRow.waived_by : null,
+                        waived_reason: reqRow.waived_reason != null ? reqRow.waived_reason : null
+                    },
+                    signature,
+                    steps,
+                    attachments
+                }
+            });
+        } catch (err) {
+            console.error('obtenerHistorialAprobacion:', err);
+            res.status(500).json({ success: false, message: 'Error al obtener el historial' });
         }
     }
 }
