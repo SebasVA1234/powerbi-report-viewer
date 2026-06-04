@@ -139,6 +139,10 @@ class UserController {
             if (!username || !email || !full_name) {
                 return res.status(400).json({ success: false, message: 'Usuario, email y nombre son requeridos' });
             }
+            // Validar el rol contra el enum del schema (CHECK admin|user) -> 400 limpio, no 500.
+            if (!['admin', 'user'].includes(role)) {
+                return res.status(400).json({ success: false, message: 'Rol inválido (admin o user)' });
+            }
             if (password !== undefined && password.length < 6) {
                 return res.status(400).json({
                     success: false,
@@ -218,6 +222,10 @@ class UserController {
             const user = await db.queryOne('SELECT id FROM users WHERE id = ?', [id]);
             if (!user) {
                 return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+            }
+            // Validar el rol contra el enum del schema (CHECK admin|user) -> 400, no 500.
+            if (role !== undefined && !['admin', 'user'].includes(role)) {
+                return res.status(400).json({ success: false, message: 'Rol inválido (admin o user)' });
             }
 
             const updates = [];

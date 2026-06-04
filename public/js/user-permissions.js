@@ -533,7 +533,13 @@
             const isActive = ctx.user.is_active !== false && ctx.user.is_active !== 0;
             const newState = !isActive;
             const action = newState ? 'reactivar' : 'suspender';
-            if (!confirm(`¿Seguro que querés ${action} a ${ctx.user.full_name || ctx.user.username}?`)) return;
+            const ok = await confirmDialog({
+                title: `¿${action === 'reactivar' ? 'Reactivar' : 'Suspender'} usuario?`,
+                message: ctx.user.full_name || ctx.user.username,
+                confirmText: action === 'reactivar' ? 'Reactivar' : 'Suspender',
+                danger: action === 'suspender'
+            });
+            if (!ok) return;
 
             try {
                 const r = await fetch(`/api/users/${userId}`, {
@@ -552,7 +558,13 @@
 
         async forceChangePassword() {
             const userId = this.currentUserId;
-            if (!confirm('¿Forzar cambio de contraseña en el próximo login?')) return;
+            const ok = await confirmDialog({
+                title: '¿Forzar cambio de contraseña?',
+                message: 'El usuario deberá cambiarla en su próximo inicio de sesión.',
+                confirmText: 'Forzar cambio',
+                danger: false
+            });
+            if (!ok) return;
             try {
                 const r = await fetch(`/api/users/${userId}`, {
                     method: 'PUT',
@@ -568,7 +580,13 @@
 
         async resetPassword() {
             const userId = this.currentUserId;
-            if (!confirm('Esto generará una contraseña temporal nueva. ¿Continuar?')) return;
+            const ok = await confirmDialog({
+                title: '¿Generar contraseña temporal?',
+                message: 'Se generará una contraseña temporal nueva. La verás una sola vez para entregarla al usuario.',
+                confirmText: 'Generar',
+                danger: false
+            });
+            if (!ok) return;
             const temp = generateTempPassword();
             try {
                 const r = await fetch(`/api/users/${userId}`, {
@@ -588,8 +606,13 @@
             const userId = this.currentUserId;
             const ctx = this.currentContext;
             const name = ctx.user.full_name || ctx.user.username;
-            if (!confirm(`¿ELIMINAR a ${name}? Esta acción no se puede deshacer.`)) return;
-            if (!confirm('Confirmación final: ¿estás seguro?')) return;
+            const ok = await confirmDialog({
+                title: '¿Eliminar usuario?',
+                message: `Vas a eliminar a ${name}. Esta acción NO se puede deshacer.`,
+                confirmText: 'Eliminar',
+                typeToConfirm: 'ELIMINAR'
+            });
+            if (!ok) return;
             try {
                 const r = await fetch(`/api/users/${userId}`, {
                     method: 'DELETE',

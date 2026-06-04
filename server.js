@@ -212,6 +212,10 @@ app.get('*', (req, res) => {
 
 // Manejo de errores global
 app.use((err, req, res, next) => {
+    // Body JSON malformado (lo lanza express.json) -> 400 limpio, no 500.
+    if (err.type === 'entity.parse.failed' || (err instanceof SyntaxError && 'body' in err)) {
+        return res.status(400).json({ success: false, message: 'JSON inválido en el cuerpo de la petición' });
+    }
     console.error(err.stack);
     res.status(500).json({
         success: false,
