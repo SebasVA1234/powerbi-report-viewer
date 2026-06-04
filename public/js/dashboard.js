@@ -2,6 +2,13 @@
 let currentReports = [];
 let reportViewer = null;
 
+// Escapa datos de servidor/usuario antes de innerHTML (anti-XSS). dashboard.js
+// era el ÚNICO módulo de render sin escape (landmine §4.6) — esta es la corrección.
+function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 // Initialize Dashboard
 async function initializeDashboard() {
     updateUserDisplay();
@@ -86,7 +93,7 @@ async function loadMyReports() {
             <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                 <h3>Error al cargar reportes</h3>
-                <p>${error.message || 'Ha ocurrido un error al cargar los reportes'}</p>
+                <p>Ha ocurrido un error al cargar los reportes</p>
                 <button class="btn btn-primary" onclick="loadMyReports()">Reintentar</button>
             </div>
         `;
@@ -114,7 +121,7 @@ function displayReports(reports) {
             <div class="category-group">
                 <div class="category-header">
                     <div class="category-icon">${getCategoryIcon(category)}</div>
-                    <h3>${category}</h3>
+                    <h3>${escapeHtml(category)}</h3>
                     <span class="category-count">${categoryReports.length} reporte${categoryReports.length !== 1 ? 's' : ''}</span>
                 </div>
                 <div class="reports-grid">
@@ -135,8 +142,8 @@ function createReportCard(report) {
         <div class="report-card" data-report-id="${report.id}">
             <div class="report-card-header">
                 <div>
-                    ${report.category ? `<span class="report-category">${report.category}</span>` : ''}
-                    <h3>${report.name}</h3>
+                    ${report.category ? `<span class="report-category">${escapeHtml(report.category)}</span>` : ''}
+                    <h3>${escapeHtml(report.name)}</h3>
                 </div>
                 <span class="report-favorite" title="Marcar como favorito">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -145,7 +152,7 @@ function createReportCard(report) {
                 </span>
             </div>
             <div class="report-card-body">
-                <p class="report-description">${report.description || 'Sin descripción disponible'}</p>
+                <p class="report-description">${report.description ? escapeHtml(report.description) : 'Sin descripción disponible'}</p>
                 <div class="report-meta">
                     <div class="report-meta-item">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>

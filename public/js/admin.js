@@ -171,15 +171,15 @@ function displayUsers(users) {
         <tr>
             <td>
                 <div class="user-row">
-                    <div class="user-avatar">${user.full_name.charAt(0).toUpperCase()}</div>
+                    <div class="user-avatar">${escapeHtmlSafe((user.full_name || '').charAt(0).toUpperCase())}</div>
                     <div class="user-details">
-                        <div class="user-name">${user.full_name}</div>
-                        <div class="user-username">@${user.username}</div>
+                        <div class="user-name">${escapeHtmlSafe(user.full_name)}</div>
+                        <div class="user-username">@${escapeHtmlSafe(user.username)}</div>
                     </div>
                 </div>
             </td>
-            <td>${user.full_name}</td>
-            <td>${user.email}</td>
+            <td>${escapeHtmlSafe(user.full_name)}</td>
+            <td>${escapeHtmlSafe(user.email)}</td>
             <td><span class="role-pill ${rolePillClass}"><span class="role-dot"></span>${roleLabel}</span></td>
             <td>${deptsCell}</td>
             <td><span class="badge ${user.is_active ? 'badge-success' : 'badge-danger'}">${user.is_active ? 'Activo' : 'Inactivo'}</span></td>
@@ -203,6 +203,15 @@ function displayUsers(users) {
 function escapeHtmlSafe(s) {
     if (s === null || s === undefined) return '';
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Escapa un string para usarlo DENTRO de '...' en un atributo onclick (doble
+// contexto: primero JS string, luego atributo HTML). Sin esto, un nombre con
+// comilla o '<' rompe/inyecta el handler. (Patrón de hr-admin.js.)
+function escapeJsAttr(s) {
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/\\/g, '\\\\').replace(/'/g, "\\'")                                     // contexto JS string
+        .replace(/[&"<>]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' }[c])); // contexto atributo HTML
 }
 
 // Aplicar filtros sobre currentUsers (client-side).
@@ -324,9 +333,9 @@ function displayAllReports(reports) {
     
     tbody.innerHTML = reports.map(report => `
         <tr>
-            <td><strong>${report.name}</strong></td>
-            <td>${report.category || 'Sin categoría'}</td>
-            <td>${report.description || 'Sin descripción'}</td>
+            <td><strong>${escapeHtmlSafe(report.name)}</strong></td>
+            <td>${report.category ? escapeHtmlSafe(report.category) : 'Sin categoría'}</td>
+            <td>${report.description ? escapeHtmlSafe(report.description) : 'Sin descripción'}</td>
             <td><span class="badge badge-info">${report.users_with_access || 0} usuarios</span></td>
             <td><span class="badge ${report.is_active ? 'badge-success' : 'badge-danger'}">${report.is_active ? 'Activo' : 'Inactivo'}</span></td>
             <td>
@@ -334,7 +343,7 @@ function displayAllReports(reports) {
                     <button class="btn-edit" onclick="editReport(${report.id})" title="Editar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     </button>
-                    <button class="btn-permissions" onclick="showReportAccessModal(${report.id}, '${report.name}')" title="Gestionar Accesos">
+                    <button class="btn-permissions" onclick="showReportAccessModal(${report.id}, '${escapeJsAttr(report.name)}')" title="Gestionar Accesos">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                     </button>
                     <button class="btn-delete" onclick="deleteReport(${report.id})" title="Eliminar">
@@ -370,11 +379,11 @@ function displayPermissionsMatrix(data) {
     }
     let html = '<table class="matrix-table"><thead><tr><th>Usuario</th>';
     data.reports.forEach(report => {
-        html += `<th class="rotate" title="${report.name}">${report.name.substring(0, 15)}...</th>`;
+        html += `<th class="rotate" title="${escapeHtmlSafe(report.name)}">${escapeHtmlSafe(report.name.substring(0, 15))}...</th>`;
     });
     html += '</tr></thead><tbody>';
     data.matrix.forEach(userRow => {
-        html += `<tr><td><strong>${userRow.user.username}</strong></td>`;
+        html += `<tr><td><strong>${escapeHtmlSafe(userRow.user.username)}</strong></td>`;
         data.reports.forEach(report => {
             const permission = userRow.permissions[report.id];
             const checked = permission && permission.can_view;
@@ -430,7 +439,7 @@ async function showCreateUserModal() {
         document.getElementById('create-user-departments-checks').innerHTML = renderChecks(depts, 'create-user-dept-check');
         document.getElementById('create-user-roles-checks').innerHTML       = renderChecks(roles, 'create-user-role-check');
     } catch (err) {
-        document.getElementById('create-user-departments-checks').innerHTML = '<em style="color:var(--danger); font-size:0.85rem;">No se pudo cargar el catálogo: ' + (err.message || err) + '</em>';
+        document.getElementById('create-user-departments-checks').innerHTML = '<em style="color:var(--danger); font-size:0.85rem;">No se pudo cargar el catálogo. Podés asignarlo después desde Permisos avanzados.</em>';
         document.getElementById('create-user-roles-checks').innerHTML       = '';
     }
 }

@@ -100,8 +100,13 @@ async function transaction(callback) {
             const trimmed = sql.trim();
             const isInsert = /^insert\s/i.test(trimmed);
             const hasReturning = /\sreturning\s/i.test(trimmed);
+            // Mismo guard que el execute principal: NO agregar RETURNING id si la
+            // query usa ON CONFLICT (las junction tables con PK compuesta sin `id`
+            // crashearían con "column id does not exist" en Postgres). Vital para
+            // los upserts que la nómina/vacaciones harán DENTRO de transacciones.
+            const hasOnConflict = /\son\s+conflict\b/i.test(trimmed);
             let text = translateToPg(sql);
-            if (isInsert && !hasReturning) {
+            if (isInsert && !hasReturning && !hasOnConflict) {
                 text = text.replace(/;?\s*$/, '') + ' RETURNING id';
             }
             const r = await client.query(text, params);
