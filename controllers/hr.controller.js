@@ -204,14 +204,30 @@ class HrController {
 
     static async getDirectReports(req, res) {
         try {
-            const { id } = req.params;
+            const managerId = Number(req.params.id);
+            // Validación de entrada: el id debe ser un entero positivo.
+            if (!Number.isInteger(managerId) || managerId <= 0) {
+                return res.status(400).json({ success: false, message: 'ID de empleado inválido' });
+            }
+            // Autorización (cierra IDOR): este endpoint devolvía el equipo de
+            // CUALQUIER jefe sin verificar permiso. Ahora reutilizamos la misma
+            // visibilidad RRHH que el resto del módulo (getVisibleEmployeeIds):
+            //   - devuelve null  → admin / hr.read.all → ve todo.
+            //   - en otro caso, el id del jefe debe estar dentro de su scope visible
+            //     (un jefe ve su propio equipo; un empleado sólo su propio id).
+            // getVisibleEmployeeIds devuelve un Array (o null si ve todo); por eso
+            // usamos .includes() — mismo patrón que getEmployeeById.
+            const visibleIds = await getVisibleEmployeeIds(req.user.id);
+            if (visibleIds !== null && !visibleIds.includes(managerId)) {
+                return res.status(403).json({ success: false, message: 'No autorizado para ver el equipo de este empleado' });
+            }
             const reports = await db.query(`
                 SELECT e.id, e.full_name, p.title AS position_title, e.status
                 FROM hr_employees e
                 LEFT JOIN hr_positions p ON e.position_id = p.id
                 WHERE e.manager_id = ?
                 ORDER BY e.full_name
-            `, [id]);
+            `, [managerId]);
             res.json({ success: true, data: { reports } });
         } catch (err) {
             console.error('getDirectReports:', err);
@@ -823,9 +839,21 @@ class HrController {
             if (!employee) {
                 return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
             }
+            // Separación de funciones: editar el SALARIO BASE exige un permiso
+            // dedicado (hr.salary.write), además del hr.write que ya pide la ruta.
+            // Motivo: cuando la nómina entre en operación, alguien con hr.write
+            // podrá corregir datos del empleado (teléfono, dirección) SIN poder
+            // tocar sueldos. El salario es PII crítica → principio de menor privilegio.
+            const ctx = await getUserContext(req.user.id, req);
+            const canEditSalary = ctx.isAdmin || ctx.permissions.has('hr.salary.write');
+            if (req.body.base_salary !== undefined && !canEditSalary) {
+                return res.status(403).json({ success: false, message: 'No autorizado para modificar el salario base' });
+            }
             const allowed = ['full_name', 'doc_id', 'email_personal', 'phone',
                              'position_id', 'department_id', 'manager_id',
-                             'hire_date', 'status', 'address', 'notes', 'user_id', 'base_salary'];
+                             'hire_date', 'status', 'address', 'notes', 'user_id'];
+            // base_salary sólo entra al allowlist si el caller tiene el permiso dedicado.
+            if (canEditSalary) allowed.push('base_salary');
             const updates = [];
             const values = [];
             for (const k of allowed) {

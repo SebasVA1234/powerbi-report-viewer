@@ -312,6 +312,7 @@ async function seedRbac() {
         ['hr.read.team',       'hr',         'read.team', 'Ver empleados del propio departamento (jefe)'],
         ['hr.read.all',        'hr',         'read.all',  'Ver todos los empleados (RRHH/Gerencia)'],
         ['hr.write',           'hr',         'write',     'Crear, editar empleados'],
+        ['hr.salary.write',    'hr',         'salary.write', 'Editar el salario base de empleados (separación de funciones para nómina)'],
         ['hr.documents.upload','hr',         'documents.upload', 'Subir documentos al expediente del empleado'],
         ['hr.positions.manage','hr',         'positions.manage', 'CRUD de perfiles de cargo'],
         // PR-3b: feriados y banco de días compensados
@@ -396,7 +397,7 @@ async function seedRbac() {
         'reports.read.assigned', 'documents.read.assigned',
         'audit.read',
         'hr.read.own',   // necesario para acceder al módulo RRHH en el sidebar
-        'hr.read.all', 'hr.write', 'hr.documents.upload', 'hr.positions.manage',
+        'hr.read.all', 'hr.write', 'hr.salary.write', 'hr.documents.upload', 'hr.positions.manage',
         'hr.holidays.manage', 'hr.attendance.manage',  // PR-3b
         'hr.timeoff.approve',                           // PR-3c
         'hr.memos.read', 'hr.memos.write'               // PR-3d
@@ -438,7 +439,8 @@ async function seedRbac() {
         await db.execute(ud, [adminUser.id, gerenciaDept.id, 1, adminUser.id]);
     }
 
-    console.log('🛡️  RBAC: 9 roles, 15 permisos, 8 departamentos sembrados; admin asignado a Gerencia.');
+    // Conteo dinámico para que el log no se desfase cuando se agreguen roles/permisos.
+    console.log(`🛡️  RBAC: ${ROLES.length} roles, ${PERMS.length} permisos, ${DEPTS.length} departamentos sembrados; admin asignado a Gerencia.`);
 }
 
 async function seedSystemConfig() {
