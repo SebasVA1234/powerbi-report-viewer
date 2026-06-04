@@ -294,18 +294,25 @@ const rbacAdmin = (function () {
             Notification.error('Primero seleccioná un recurso.');
             return;
         }
-        const principalType = window.prompt('Asignar a (user / department / role):', 'department');
-        if (!principalType || !['user', 'department', 'role'].includes(principalType)) return;
-        const principalId = window.prompt('ID del ' + principalType + ' (numérico):');
-        if (!principalId || isNaN(Number(principalId))) return;
-        const actionsStr = window.prompt('Acciones separadas por coma (view, export):', 'view');
-        const actions = (actionsStr || 'view').split(',').map(s => s.trim()).filter(Boolean);
+        const data = await formDialog({
+            title: 'Asignar acceso (ACL)',
+            fields: [
+                { name: 'principal_type', label: 'Asignar a', type: 'select', required: true, default: 'department',
+                  options: [{ value: 'user', label: 'Usuario' }, { value: 'department', label: 'Departamento' }, { value: 'role', label: 'Rol' }] },
+                { name: 'principal_id', label: 'ID (numérico)', type: 'number', required: true, placeholder: 'ej: 3' },
+                { name: 'actions', label: 'Acciones (separadas por coma)', type: 'text', required: true, default: 'view', placeholder: 'view, export' }
+            ],
+            confirmText: 'Asignar acceso'
+        });
+        if (!data) return;
+        if (isNaN(Number(data.principal_id))) { Notification.error('El ID debe ser numérico.'); return; }
+        const actions = (data.actions || 'view').split(',').map(s => s.trim()).filter(Boolean);
         try {
             await api('POST', '/api/rbac/acl', {
                 resource_type: type,
                 resource_id: Number(id),
-                principal_type: principalType,
-                principal_id: Number(principalId),
+                principal_type: data.principal_type,
+                principal_id: Number(data.principal_id),
                 actions
             });
             Notification.success('ACL creada');
@@ -316,7 +323,8 @@ const rbacAdmin = (function () {
     }
 
     async function deleteAcl(id) {
-        if (!window.confirm('¿Quitar este acceso?')) return;
+        const ok = await confirmDialog({ title: '¿Quitar este acceso?', confirmText: 'Quitar' });
+        if (!ok) return;
         try {
             await api('DELETE', `/api/rbac/acl/${id}`);
             Notification.success('ACL eliminada');
@@ -423,7 +431,8 @@ const rbacAdmin = (function () {
     }
 
     async function deleteAclAndReload(id, viewName) {
-        if (!window.confirm('¿Quitar este acceso?')) return;
+        const ok = await confirmDialog({ title: '¿Quitar este acceso?', confirmText: 'Quitar' });
+        if (!ok) return;
         try {
             await api('DELETE', `/api/rbac/acl/${id}`);
             Notification.success('ACL eliminada');

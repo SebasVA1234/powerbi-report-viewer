@@ -160,7 +160,6 @@ function createReportCard(report) {
                     </div>
                     <div class="report-actions">
                         <button class="btn-view-report" onclick="openReport(${report.id})">Ver</button>
-                        ${canExport ? `<button class="btn-export" onclick="exportReport(${report.id})">Exportar</button>` : ''}
                     </div>
                 </div>
             </div>
