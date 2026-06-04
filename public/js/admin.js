@@ -432,7 +432,7 @@ async function showCreateUserModal() {
             : items.map(it => `
                 <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.6rem; border-radius:6px; background:rgba(255,255,255,0.03); cursor:pointer;">
                     <input type="checkbox" class="${klass}" value="${it.id}" data-code="${it.code || ''}">
-                    <span>${(it.name || '').replace(/</g,'&lt;')}</span>
+                    <span>${escapeHtmlSafe(it.name)}</span>
                 </label>
             `).join('');
 
@@ -677,7 +677,7 @@ function _renderCheckList(containerId, items, currentIds, klass) {
             return `
                 <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border-radius:8px; background:rgba(255,255,255,0.04); cursor:pointer;">
                     <input type="checkbox" class="${klass}" value="${it.id}" ${checked}>
-                    <span>${Utils.escapeHtml ? Utils.escapeHtml(it.label) : it.label}</span>
+                    <span>${escapeHtmlSafe(it.label)}</span>
                 </label>
             `;
         }).join('')}
