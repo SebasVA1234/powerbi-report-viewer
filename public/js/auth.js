@@ -62,25 +62,29 @@ const Auth = {
     }
 };
 
-// Forzado de cambio de password en el primer login.
-// Si el backend devuelve must_change_password=true, pedimos una nueva
-// pass con prompt() y llamamos al endpoint /auth/change-my-password.
-// La UI definitiva (modal con confirmación, validación, etc.) llega en
-// Fase 2; este flujo es deliberadamente austero para no extender PR-0b
-// más allá del scope de seguridad.
+// Forzado de cambio de password en el primer login. Si el backend devuelve
+// must_change_password=true, pedimos una nueva pass con un modal del design
+// system (formDialog) y llamamos a /auth/change-my-password. Loop hasta éxito
+// o cancelación (cancelar = cerrar sesión). Sin prompts/alerts nativos.
 async function handleForcedPasswordChange(username) {
     while (true) {
-        const newPass = window.prompt(
-            'Debes cambiar tu contraseña antes de continuar.\n\n' +
-            'Mínimo 8 caracteres.'
-        );
-        if (newPass === null) {
-            // El usuario canceló el prompt — cerramos sesión.
+        const form = await formDialog({
+            title: 'Cambio de contraseña obligatorio',
+            description: 'Por seguridad, debés cambiar tu contraseña antes de continuar.',
+            fields: [
+                { name: 'new_password', label: 'Nueva contraseña (mínimo 8 caracteres)', type: 'password', required: true }
+            ],
+            confirmText: 'Cambiar contraseña',
+            cancelText: 'Cancelar y salir'
+        });
+        if (!form) {
+            // El usuario canceló — cerramos sesión.
             await Auth.logout();
             return false;
         }
+        const newPass = form.new_password;
         if (typeof newPass !== 'string' || newPass.length < 8) {
-            window.alert('La contraseña debe tener al menos 8 caracteres.');
+            Notification.error('La contraseña debe tener al menos 8 caracteres.');
             continue;
         }
         try {
@@ -94,34 +98,45 @@ async function handleForcedPasswordChange(username) {
             });
             const data = await resp.json();
             if (resp.ok && data.success) {
-                window.alert('Contraseña actualizada. Volvé a iniciar sesión con la nueva.');
+                await infoDialog({
+                    title: 'Contraseña actualizada',
+                    message: 'Volvé a iniciar sesión con tu nueva contraseña.'
+                });
                 Utils.removeToken();
                 Utils.removeUser();
                 window.location.reload();
                 return true;
             }
-            window.alert(data.message || 'No se pudo cambiar la contraseña.');
+            Notification.error(data.message || 'No se pudo cambiar la contraseña.');
         } catch (err) {
-            window.alert('Error de red al cambiar la contraseña.');
+            Notification.error('Error de red al cambiar la contraseña.');
         }
     }
 }
 
 // PR-0b.1: si el login devuelve needs_totp, pedimos el código de la app
-// autenticadora con prompt() y llamamos /auth/totp/verify usando el
-// totp_token (JWT temporal de 5 min) como Authorization. Si el código
-// es correcto, recibimos el JWT real y guardamos la sesión.
-// UI definitiva (modal con autofocus, retry pulido, recovery codes)
-// llega en Fase 2.
+// autenticadora con un modal del design system (formDialog) y llamamos a
+// /auth/totp/verify usando el totp_token (JWT temporal de 5 min) como
+// Authorization. Si el código es correcto, recibimos el JWT real y guardamos
+// la sesión. Loop hasta éxito o cancelación. Sin prompts/alerts nativos.
 async function handleTotpRequired(totpToken) {
     while (true) {
-        const code = window.prompt('Ingresá el código de 6 dígitos de tu app autenticadora (Google Authenticator, Authy, etc.)');
-        if (code === null) {
+        const form = await formDialog({
+            title: 'Verificación en dos pasos',
+            description: 'Ingresá el código de 6 dígitos de tu app autenticadora (Google Authenticator, Authy, etc.).',
+            fields: [
+                { name: 'code', label: 'Código de 6 dígitos', type: 'text', required: true, placeholder: '000000' }
+            ],
+            confirmText: 'Verificar',
+            cancelText: 'Cancelar'
+        });
+        if (!form) {
             // Cancelado → volvemos al login limpio
             return false;
         }
+        const code = (form.code || '').trim();
         if (!/^\d{6}$/.test(code)) {
-            window.alert('Debe ser un código de 6 dígitos.');
+            Notification.error('Debe ser un código de 6 dígitos.');
             continue;
         }
         try {
@@ -139,9 +154,9 @@ async function handleTotpRequired(totpToken) {
                 Utils.setUser(data.data.user);
                 return true;
             }
-            window.alert(data.message || 'Código incorrecto.');
+            Notification.error(data.message || 'Código incorrecto.');
         } catch (err) {
-            window.alert('Error de red al verificar el código.');
+            Notification.error('Error de red al verificar el código.');
         }
     }
 }
@@ -205,7 +220,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Logout Function
 async function logout() {
-    if (confirm('¿Está seguro que desea cerrar sesión?')) {
+    const ok = await confirmDialog({
+        title: '¿Cerrar sesión?',
+        confirmText: 'Cerrar sesión',
+        danger: false
+    });
+    if (ok) {
         await Auth.logout();
     }
 }
