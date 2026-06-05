@@ -437,15 +437,78 @@ const hrAdmin = (function () {
         }
     }
 
-    // ------------------------------------------------------------
-    // Tab: Solicitudes (time-off)
-    // ------------------------------------------------------------
+    // ============================================================
+    // Tab: Solicitudes (time-off) — F1: firma + aprobación multinivel
+    // ============================================================
+    //
+    // El contrato F1 (/api/hr/time-off, 7 endpoints) cambia varias cosas
+    // respecto al flujo viejo, y este módulo las consume al pie de la letra:
+    //   - Crear exige una FIRMA electrónica (checkbox + nombre EXACTO en
+    //     mayúsculas + cédula). Se hace en 2 pasos: datos → firma.
+    //   - Los estados ya no son sólo pending/approved/rejected/cancelled:
+    //     ahora una solicitud nace en pending_jefe (sólo vacaciones) o
+    //     pending_tthh (resto), y el workflow es multinivel.
+    //   - Rechazar manda { comment } (NO { reason } como antes).
+    //   - permiso_personal/enfermedad piden justificativo adjunto.
+    //   - RRHH puede decidir si la solicitud descuenta saldo o se justifica
+    //     sin descuento (waive).
+
+    // feriado_compensado descuenta del BANCO de días, no de vacaciones/días-ley:
+    // por eso el override "justificado sin descuento" (waive) NO aplica y el
+    // backend devuelve 400 si se intenta. Lo excluimos en la UI de descuento.
+    const TIPOS_SIN_WAIVE = ['feriado_compensado'];
+
+    // Etiquetas legibles de cada estado del workflow (la API devuelve el code
+    // crudo en snake_case; nunca mostramos el code pelado al usuario).
+    const ESTADO_LABEL = {
+        pending:       'Pendiente',
+        pending_jefe:  'Pendiente del jefe',
+        pending_tthh:  'Pendiente de RRHH',
+        approved:      'Aprobada',
+        rejected:      'Rechazada',
+        cancelled:     'Cancelada'
+    };
+
+    // Clase de badge del design system por estado. Los pendientes van en
+    // info/ámbar, aprobado en verde, rechazado/cancelado en rojo/gris.
+    const ESTADO_BADGE = {
+        pending:       'badge-info',
+        pending_jefe:  'badge-warning',
+        pending_tthh:  'badge-info',
+        approved:      'badge-success',
+        rejected:      'badge-danger',
+        cancelled:     'badge-danger'
+    };
+
+    // Etiquetas legibles del tipo de solicitud.
+    const TIPO_LABEL = {
+        vacaciones:         'Vacaciones',
+        feriado_compensado: 'Feriado compensado',
+        permiso_personal:   'Permiso personal',
+        enfermedad:         'Enfermedad',
+        otro:               'Otro'
+    };
+
+    function estadoBadgeHtml(status) {
+        const cls = ESTADO_BADGE[status] || 'badge-info';
+        const label = ESTADO_LABEL[status] || status;
+        return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+    }
+
+    function tipoLabel(t) { return TIPO_LABEL[t] || t; }
+
+    // ¿Está la solicitud en algún estado pendiente del workflow? (puede actuarse
+    // sobre ella). 'pending' se conserva sólo por filas históricas.
+    function esPendiente(status) {
+        return status === 'pending' || status === 'pending_jefe' || status === 'pending_tthh';
+    }
+
     async function loadTimeOff() {
         const tbody = document.getElementById('hr-time-off-tbody');
         const status = document.getElementById('hr-time-off-status').value;
         tbody.innerHTML = '<tr><td colspan="7" class="loading">Cargando...</td></tr>';
         try {
-            const url = status ? `/api/hr/time-off?status=${status}` : '/api/hr/time-off';
+            const url = status ? `/api/hr/time-off?status=${encodeURIComponent(status)}` : '/api/hr/time-off';
             const r = await api('GET', url);
             const reqs = r.data.requests || [];
             if (reqs.length === 0) {
@@ -453,52 +516,71 @@ const hrAdmin = (function () {
                 return;
             }
             tbody.innerHTML = reqs.map(req => {
-                const isPending = req.status === 'pending';
+                const pendiente = esPendiente(req.status);
+                // En estado pendiente mostramos las acciones de aprobador; el
+                // backend decide server-side si quien llama es el jefe (vacaciones
+                // en pending_jefe) o RRHH (pending_tthh) y responde 403/409 si no
+                // corresponde. La UI es cosmética: no es la barrera de seguridad.
+                const accionesPendiente = pendiente ? `
+                    <button class="btn-edit" onclick="hrAdmin.approveTimeOff(${req.id})">Aprobar</button>
+                    <button class="btn-delete" onclick="hrAdmin.rejectTimeOff(${req.id})">Rechazar</button>
+                    <button class="btn-edit" onclick="hrAdmin.cancelTimeOff(${req.id})">Cancelar</button>
+                ` : '';
                 return `
                     <tr>
                         <td>${escapeHtml(req.employee_name)}<br><small>${escapeHtml(req.department_name || '')}</small></td>
-                        <td>${escapeHtml(req.request_type)}</td>
+                        <td>${escapeHtml(tipoLabel(req.request_type))}</td>
                         <td>${escapeHtml(fmtDate(req.date_from))}</td>
                         <td>${escapeHtml(fmtDate(req.date_to))}</td>
-                        <td>${req.days_count}</td>
-                        <td><span class="badge ${req.status === 'approved' ? 'badge-success' : req.status === 'pending' ? 'badge-info' : 'badge-danger'}">${escapeHtml(req.status)}</span></td>
+                        <td>${escapeHtml(String(req.days_count))}</td>
+                        <td>${estadoBadgeHtml(req.status)}</td>
                         <td>
-                            ${isPending ? `<button class="btn-edit" onclick="hrAdmin.approveTimeOff(${req.id})">Aprobar</button>` : ''}
-                            ${isPending ? `<button class="btn-delete" onclick="hrAdmin.rejectTimeOff(${req.id})">Rechazar</button>` : ''}
-                            ${isPending ? `<button class="btn-edit" onclick="hrAdmin.cancelTimeOff(${req.id})">Cancelar</button>` : ''}
-                            ${!isPending && req.rejection_reason ? `<small title="${escapeHtml(req.rejection_reason)}">📝</small>` : ''}
+                            <button class="btn-edit" onclick="hrAdmin.openTimeOffDetail(${req.id})">Detalle</button>
+                            ${accionesPendiente}
                         </td>
                     </tr>
                 `;
             }).join('');
         } catch (err) {
+            // Mensaje genérico: nunca filtramos internals del servidor al usuario.
             tbody.innerHTML = `<tr><td colspan="7" class="error">${escapeHtml(err.message)}</td></tr>`;
         }
     }
 
+    // --- Crear solicitud + FIRMA (2 pasos) ------------------------------------
+    // Paso 1: datos de la solicitud. Paso 2: firma electrónica (checkbox +
+    // nombre EXACTO en mayúsculas + cédula). El nombre del firmante debe
+    // coincidir con el full_name del empleado objetivo (confirmación tipo
+    // "tipeá para confirmar"); lo validamos en cliente para fallar rápido y
+    // claro, pero el backend lo re-valida y devuelve 422 si no coincide.
     async function openCreateTimeOff() {
         try {
             const me = await api('GET', '/api/hr/me');
             const myEmployee = me.data.employee;
             const isAdmin = Auth.isAdmin();
 
-            const fields = [];
+            // Empleados disponibles (sólo admin/RRHH puede firmar en nombre de otro).
+            let emps = [];
             if (isAdmin) {
-                const emps = await getEmployees();
-                const opts = [{ value: '', label: 'Para mí (admin)' }]
-                    .concat(emps.map(e => ({ value: e.id, label: `${e.full_name} (${e.department_name || '-'})` })));
-                fields.push({ name: 'employee_id', label: 'Empleado', type: 'select', options: opts });
+                emps = await getEmployees();
             } else if (!myEmployee) {
                 Notification.error('No tenés perfil de empleado. Pedile a RRHH que te cree uno.');
                 return;
             }
+
+            const fields = [];
+            if (isAdmin) {
+                const opts = [{ value: '', label: 'Para mí (admin)' }]
+                    .concat(emps.map(e => ({ value: String(e.id), label: `${e.full_name} (${e.department_name || '-'})` })));
+                fields.push({ name: 'employee_id', label: 'Empleado', type: 'select', options: opts });
+            }
             fields.push(
                 { name: 'request_type', label: 'Tipo de solicitud', type: 'select', required: true,
                   options: [
-                    { value: 'vacaciones',          label: 'Vacaciones' },
+                    { value: 'vacaciones',          label: 'Vacaciones (pasa por tu jefe y luego RRHH)' },
                     { value: 'feriado_compensado',  label: 'Feriado compensado (descuenta del banco)' },
-                    { value: 'permiso_personal',    label: 'Permiso personal' },
-                    { value: 'enfermedad',          label: 'Enfermedad' },
+                    { value: 'permiso_personal',    label: 'Permiso personal (requiere justificativo)' },
+                    { value: 'enfermedad',          label: 'Enfermedad (requiere justificativo)' },
                     { value: 'otro',                label: 'Otro' }
                   ] },
                 { name: 'date_from', label: 'Desde', type: 'date', required: true },
@@ -508,59 +590,267 @@ const hrAdmin = (function () {
             );
 
             const data = await formDialog({
-                title: 'Nueva solicitud de tiempo libre',
+                title: 'Nueva solicitud · Paso 1 de 2: datos',
+                description: 'Tras completar los datos, en el siguiente paso firmarás electrónicamente la solicitud.',
                 fields,
-                confirmText: 'Crear solicitud'
+                confirmText: 'Continuar a la firma'
             });
             if (!data) return;
 
+            // Validaciones de cliente para fallar rápido y claro.
             const days = Number(data.days_count);
-            if (!days || days <= 0) { Notification.error('Días inválido'); return; }
+            if (!days || days <= 0) { Notification.error('Indicá una cantidad de días válida (mayor a 0).'); return; }
+            if (data.date_from > data.date_to) { Notification.error('La fecha "Desde" no puede ser posterior a "Hasta".'); return; }
 
-            await api('POST', '/api/hr/time-off', {
-                employee_id: data.employee_id ? Number(data.employee_id) : null,
+            // Resolver el empleado objetivo y su nombre, para validar la firma.
+            const targetEmployeeId = data.employee_id ? Number(data.employee_id) : null;
+            let signerExpectedName = myEmployee ? myEmployee.full_name : null;
+            if (targetEmployeeId) {
+                const target = emps.find(e => e.id === targetEmployeeId);
+                if (target) signerExpectedName = target.full_name;
+            }
+
+            // Paso 2: la firma. Devuelve el payload de firma o null si cancela.
+            const signature = await collectSignature(signerExpectedName, data.request_type);
+            if (!signature) return; // canceló la firma → no se crea nada (atómico).
+
+            // El contrato (OpenAPI) marca employee_id y reason como OPCIONALES y de
+            // tipo string — NO nullable. El backend F1 valida `typeof reason === 'string'`,
+            // y como `typeof null === 'object'`, mandar null devuelve 400. Por eso los
+            // campos opcionales se OMITEN cuando están vacíos (no se mandan como null);
+            // así el caso normal (vacaciones/feriado sin motivo) pasa limpio.
+            const payload = {
                 request_type: data.request_type,
                 date_from: data.date_from,
                 date_to: data.date_to,
                 days_count: days,
-                reason: data.reason || null
-            });
-            Notification.success('Solicitud creada');
+                signature
+            };
+            const reasonText = (data.reason || '').trim();
+            if (reasonText) payload.reason = reasonText;     // sólo si el usuario escribió algo
+            if (targetEmployeeId) payload.employee_id = targetEmployeeId; // sólo si es "por otro"
+
+            const resp = await api('POST', '/api/hr/time-off', payload);
+
+            Notification.success('Solicitud creada y firmada');
             loadTimeOff();
+
+            // Si el tipo exige justificativo, ofrecemos subirlo en el momento
+            // (la solicitud queda "para descuento" hasta que llegue la evidencia).
+            const created = resp.data || {};
+            if (created.requires_attachment && created.id) {
+                const subir = await confirmDialog({
+                    title: 'Esta solicitud requiere un justificativo',
+                    message: 'Permiso personal y enfermedad necesitan evidencia (certificado médico, etc.). Mientras falte, RRHH la verá marcada "para descuento". ¿Querés subir el archivo ahora?',
+                    confirmText: 'Subir justificativo',
+                    cancelText: 'Más tarde',
+                    danger: false
+                });
+                if (subir) await uploadAttachment(created.id);
+            }
         } catch (err) {
+            // 422 = firma inválida (no coincide el nombre, etc.). El backend ya
+            // devuelve un mensaje claro; lo mostramos tal cual viene saneado.
             Notification.error('No se pudo crear: ' + err.message);
         }
     }
 
-    async function approveTimeOff(id) {
-        const ok = await confirmDialog({
-            title: '¿Aprobar esta solicitud?',
-            message: 'Si la solicitud es de tipo "feriado compensado", se descuenta automáticamente del banco del empleado.',
-            confirmText: 'Aprobar',
-            danger: false
+    // Modal de firma electrónica (paso 2). Reproduce el "papel": el firmante
+    // acepta los términos, teclea su NOMBRE Y APELLIDOS en mayúsculas (debe
+    // coincidir con el del empleado) y su cédula (6–13 dígitos). Devuelve
+    // { accepted, signer_name, signer_doc_id } o null si cancela.
+    function collectSignature(expectedName, requestType) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'confirm-dialog-overlay';
+            const expectedUpper = (expectedName || '').toUpperCase();
+            overlay.innerHTML = `
+                <div class="confirm-dialog" role="dialog" aria-modal="true" style="width:min(540px,92vw); max-height:88vh; overflow-y:auto;">
+                    <h3>Firma electrónica · Paso 2 de 2</h3>
+                    <div class="confirm-msg">
+                        Al firmar, declarás que la información de la solicitud
+                        (${escapeHtml(tipoLabel(requestType))}) es verídica. La firma queda
+                        sellada con un hash criptográfico y no podrá alterarse.
+                    </div>
+                    <div class="form-group" style="margin:0.85rem 0; display:flex; align-items:flex-start; gap:0.55rem;">
+                        <input type="checkbox" id="sig-accept" style="margin-top:0.25rem; width:auto;">
+                        <label for="sig-accept" style="cursor:pointer;">Acepto los términos y condiciones y firmo esta solicitud de forma conforme.</label>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.85rem;">
+                        <label for="sig-name">Nombres y apellidos (en MAYÚSCULAS) *</label>
+                        <input id="sig-name" type="text" autocomplete="off" spellcheck="false"
+                            placeholder="${escapeHtml(expectedUpper || 'TU NOMBRE COMPLETO')}"
+                            style="width:100%; background:var(--bg-input); color:var(--text-1); border:1px solid var(--border); border-radius:var(--radius-sm); padding:0.55rem 0.75rem; text-transform:uppercase;">
+                        ${expectedUpper ? `<small>Debe coincidir exactamente con: <strong>${escapeHtml(expectedUpper)}</strong></small>` : ''}
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.85rem;">
+                        <label for="sig-doc">Cédula (solo dígitos) *</label>
+                        <input id="sig-doc" type="text" inputmode="numeric" autocomplete="off" spellcheck="false"
+                            placeholder="Ej: 0102030405" maxlength="13"
+                            style="width:100%; background:var(--bg-input); color:var(--text-1); border:1px solid var(--border); border-radius:var(--radius-sm); padding:0.55rem 0.75rem;">
+                    </div>
+                    <div class="sig-error" style="color:var(--danger); min-height:1.1rem; font-size:0.85rem; margin-bottom:0.4rem;"></div>
+                    <div class="confirm-actions">
+                        <button class="btn-confirm-cancel">Cancelar</button>
+                        <button class="btn-confirm-confirm" disabled style="background:var(--primary); border-color:var(--primary);">Firmar y enviar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            const accept = overlay.querySelector('#sig-accept');
+            const nameInput = overlay.querySelector('#sig-name');
+            const docInput = overlay.querySelector('#sig-doc');
+            const errEl = overlay.querySelector('.sig-error');
+            const cancelBtn = overlay.querySelector('.btn-confirm-cancel');
+            const confirmBtn = overlay.querySelector('.btn-confirm-confirm');
+
+            function close(result) {
+                document.body.removeChild(overlay);
+                document.removeEventListener('keydown', onKey);
+                resolve(result);
+            }
+            // Normaliza el nombre tecleado a mayúsculas y valida en vivo para
+            // habilitar el botón sólo cuando todo está correcto.
+            function validar() {
+                nameInput.value = nameInput.value.toUpperCase();
+                const name = nameInput.value.trim();
+                const doc = docInput.value.trim();
+                let msg = '';
+                if (!accept.checked) msg = 'Tenés que aceptar los términos para firmar.';
+                else if (name.length < 3) msg = 'Escribí tu nombre completo.';
+                else if (expectedUpper && name !== expectedUpper) msg = 'El nombre no coincide con el del empleado.';
+                else if (!/^[0-9]{6,13}$/.test(doc)) msg = 'La cédula debe tener entre 6 y 13 dígitos.';
+                errEl.textContent = msg;
+                confirmBtn.disabled = msg !== '';
+            }
+            function onKey(e) {
+                if (e.key === 'Escape') close(null);
+                if (e.key === 'Enter' && !confirmBtn.disabled) doConfirm();
+            }
+            function doConfirm() {
+                close({
+                    accepted: true,
+                    signer_name: nameInput.value.trim(),
+                    signer_doc_id: docInput.value.trim()
+                });
+            }
+            accept.addEventListener('change', validar);
+            nameInput.addEventListener('input', validar);
+            docInput.addEventListener('input', validar);
+            document.addEventListener('keydown', onKey);
+            cancelBtn.onclick = () => close(null);
+            confirmBtn.onclick = doConfirm;
+            overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+            setTimeout(() => accept.focus(), 50);
         });
-        if (!ok) return;
+    }
+
+    // --- Adjuntar justificativo (multipart) -----------------------------------
+    // Abre un selector de archivo y sube el justificativo. PDF/PNG/JPEG, ≤10 MB.
+    // El backend traduce el tamaño a 413 y el tipo no permitido a 415; acá los
+    // chequeamos también en cliente para evitar el viaje y dar feedback inmediato.
+    const ADJUNTO_MAX_BYTES = 10 * 1024 * 1024; // 10 MB (igual que x-max-bytes de la spec).
+    const ADJUNTO_MIME_OK = ['application/pdf', 'image/png', 'image/jpeg'];
+
+    function uploadAttachment(requestId) {
+        return new Promise(resolve => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
+            input.style.display = 'none';
+            document.body.appendChild(input);
+
+            input.addEventListener('change', async () => {
+                const file = input.files && input.files[0];
+                document.body.removeChild(input);
+                if (!file) { resolve(false); return; }
+
+                if (!ADJUNTO_MIME_OK.includes(file.type)) {
+                    Notification.error('Tipo no permitido. Subí un PDF, PNG o JPEG.');
+                    resolve(false); return;
+                }
+                if (file.size > ADJUNTO_MAX_BYTES) {
+                    Notification.error('El archivo supera los 10 MB permitidos.');
+                    resolve(false); return;
+                }
+                try {
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    // No usamos el helper api() porque manda JSON; multipart va con
+                    // fetch directo + sólo el header Authorization (el browser pone
+                    // el Content-Type con el boundary correcto).
+                    const r = await fetch(`/api/hr/time-off/${requestId}/attachment`, {
+                        method: 'POST',
+                        headers: { ...authHeader() },
+                        body: fd
+                    });
+                    let body = null;
+                    try { body = await r.json(); } catch { body = null; }
+                    if (!r.ok) {
+                        // Mensajes específicos para los códigos del contrato.
+                        let msg = (body && body.message) || ('HTTP ' + r.status);
+                        if (r.status === 413) msg = 'El archivo supera los 10 MB permitidos.';
+                        if (r.status === 415) msg = 'Tipo no permitido. Subí un PDF, PNG o JPEG.';
+                        throw new Error(msg);
+                    }
+                    Notification.success('Justificativo subido');
+                    resolve(true);
+                } catch (err) {
+                    Notification.error('No se pudo subir: ' + err.message);
+                    resolve(false);
+                }
+            }, { once: true });
+
+            // Si el usuario cierra el selector sin elegir, limpiamos el input.
+            // (no hay evento fiable de cancelación; el change con files vacío
+            // cubre el caso real de "eligió nada".)
+            input.click();
+        });
+    }
+
+    // --- Aprobar (nivel resuelto server-side) ---------------------------------
+    async function approveTimeOff(id) {
+        const data = await formDialog({
+            title: '¿Aprobar esta solicitud?',
+            description: 'Tu rol define el nivel: si sos el jefe, pasa a RRHH; si sos RRHH, queda aprobada y se marca para descontar saldo. Podés dejar un comentario opcional.',
+            fields: [
+                { name: 'comment', label: 'Comentario (opcional)', type: 'textarea', placeholder: 'Opcional' }
+            ],
+            confirmText: 'Aprobar'
+        });
+        if (!data) return;
         try {
-            await api('POST', `/api/hr/time-off/${id}/approve`);
-            Notification.success('Solicitud aprobada');
+            const body = data.comment && data.comment.trim() ? { comment: data.comment.trim() } : {};
+            const r = await api('POST', `/api/hr/time-off/${id}/approve`, body);
+            const d = r.data || {};
+            // Feedback que refleja el nivel real en el que se actuó.
+            if (d.status === 'pending_tthh') Notification.success('Aprobada por el jefe. Ahora pasa a RRHH.');
+            else if (d.balance_marked_for_discount) Notification.success('Aprobada por RRHH. Saldo marcado para descuento.');
+            else Notification.success('Solicitud aprobada');
             loadTimeOff();
         } catch (err) {
+            // 403 = no sos el aprobador válido de este nivel; 409 = orden/estado
+            // (ej. RRHH quiso aprobar vacaciones que el jefe aún no aprobó).
             Notification.error('No se pudo aprobar: ' + err.message);
         }
     }
 
+    // --- Rechazar (comentario OBLIGATORIO; el contrato usa `comment`) ----------
     async function rejectTimeOff(id) {
         const data = await formDialog({
             title: 'Rechazar solicitud',
-            description: 'El empleado verá este motivo cuando consulte el estado.',
+            description: 'El motivo queda en el historial inmutable y el empleado lo verá. Es obligatorio.',
             fields: [
-                { name: 'reason', label: 'Motivo del rechazo', type: 'textarea', required: true }
+                { name: 'comment', label: 'Motivo del rechazo', type: 'textarea', required: true }
             ],
             confirmText: 'Rechazar solicitud'
         });
         if (!data) return;
+        const comment = (data.comment || '').trim();
+        if (comment.length < 3) { Notification.error('El motivo debe tener al menos 3 caracteres.'); return; }
         try {
-            await api('POST', `/api/hr/time-off/${id}/reject`, { reason: data.reason });
+            await api('POST', `/api/hr/time-off/${id}/reject`, { comment });
             Notification.success('Solicitud rechazada');
             loadTimeOff();
         } catch (err) {
@@ -568,10 +858,11 @@ const hrAdmin = (function () {
         }
     }
 
+    // --- Cancelar (el dueño, mientras siga pendiente) -------------------------
     async function cancelTimeOff(id) {
         const ok = await confirmDialog({
             title: '¿Cancelar esta solicitud?',
-            message: 'La solicitud queda cancelada y no se procesa. Si era de feriado compensado, no se descuenta del banco.',
+            message: 'La solicitud queda cancelada y no se procesa. Sólo se puede cancelar mientras esté pendiente.',
             confirmText: 'Sí, cancelar',
             cancelText: 'No',
             danger: false
@@ -582,8 +873,208 @@ const hrAdmin = (function () {
             Notification.success('Solicitud cancelada');
             loadTimeOff();
         } catch (err) {
+            // 409 = ya está en estado terminal; 403 = no sos el dueño ni RRHH.
             Notification.error('No se pudo cancelar: ' + err.message);
         }
+    }
+
+    // --- Decisión de descuento (EXCLUSIVO RRHH) -------------------------------
+    // discount=true → descuenta saldo (normal). discount=false → "justificado
+    // sin descuento" (waive), con motivo obligatorio. No aplica a
+    // feriado_compensado (su saldo es el banco) → el backend da 400.
+    async function openDiscountDecision(id) {
+        // El tipo se relee del detalle ya cargado (no se interpola en el onclick).
+        // Si por alguna razón el estado no coincide, queda null y el backend re-valida.
+        const requestType = (_currentTimeOffReq && _currentTimeOffReq.id === id)
+            ? _currentTimeOffReq.request_type
+            : null;
+        if (TIPOS_SIN_WAIVE.includes(requestType)) {
+            await infoDialog({
+                title: 'No aplica a feriado compensado',
+                message: 'El feriado compensado descuenta del banco de días, no de vacaciones. No tiene la opción de "justificar sin descuento".'
+            });
+            return;
+        }
+        const data = await formDialog({
+            title: 'Decisión de descuento (RRHH)',
+            description: 'Elegí si esta solicitud descuenta saldo o se justifica sin descuento (ej. licencia por ley con acta adjunta). Si justificás sin descuento, el motivo es obligatorio.',
+            fields: [
+                { name: 'decision', label: 'Decisión', type: 'select', required: true, default: 'discount',
+                  options: [
+                    { value: 'discount', label: 'Descontar saldo (normal)' },
+                    { value: 'waived',   label: 'Justificado sin descuento' }
+                  ] },
+                { name: 'reason', label: 'Motivo (obligatorio si justificás sin descuento)', type: 'textarea',
+                  placeholder: 'Ej: Art. 42.30 - fallecimiento 2.º grado, acta adjunta' }
+            ],
+            confirmText: 'Guardar decisión'
+        });
+        if (!data) return;
+
+        const discount = data.decision === 'discount';
+        const reason = (data.reason || '').trim();
+        if (!discount && reason.length < 3) {
+            Notification.error('Para justificar sin descuento, el motivo es obligatorio (mín. 3 caracteres).');
+            return;
+        }
+        try {
+            // El contrato del endpoint usa { discount: bool, reason }.
+            const body = { discount };
+            if (reason) body.reason = reason;
+            await api('POST', `/api/hr/time-off/${id}/discount-decision`, body);
+            Notification.success(discount ? 'Marcada para descontar saldo' : 'Justificada sin descuento');
+            // Si el modal de detalle está abierto sobre esta solicitud, lo refrescamos.
+            if (_currentTimeOffId === id) await renderTimeOffDetail(id);
+            loadTimeOff();
+        } catch (err) {
+            Notification.error('No se pudo guardar: ' + err.message);
+        }
+    }
+
+    // --- Detalle / Historial de aprobación ------------------------------------
+    // Abre el modal con la solicitud, su firma (+ integridad ✓/✗), los pasos del
+    // workflow, los adjuntos, y las acciones contextuales (subir justificativo,
+    // decisión de descuento) según el estado/tipo.
+    let _currentTimeOffId = null;
+    let _currentTimeOffReq = null;   // último request renderizado en el modal de detalle
+
+    async function openTimeOffDetail(id) {
+        _currentTimeOffId = id;
+        document.getElementById('hr-timeoff-detail-modal').classList.add('active');
+        await renderTimeOffDetail(id);
+    }
+
+    async function renderTimeOffDetail(id) {
+        const body = document.getElementById('hr-timeoff-detail-body');
+        const actions = document.getElementById('hr-timeoff-detail-actions');
+        body.innerHTML = '<p class="loading">Cargando historial...</p>';
+        actions.innerHTML = '';
+        try {
+            const r = await api('GET', `/api/hr/time-off/${id}/approval-history`);
+            const d = r.data || {};
+            const req = d.request || {};
+            _currentTimeOffReq = req;         // guardamos el detalle en estado: los botones
+                                              // de acción pasan sólo el id (entero) y releen
+                                              // el tipo de acá, evitando interpolar datos en onclick.
+            const sig = d.signature;          // puede ser null
+            const steps = d.steps || [];
+            const attachments = d.attachments || [];
+
+            // --- Bloque firma ---
+            let sigHtml;
+            if (sig) {
+                const integ = sig.signature_integrity
+                    ? '<span style="color:#10b981;">✓ Integridad verificada</span>'
+                    : '<span style="color:#ef4444;"><strong>✗ ALERTA: la firma no coincide (datos alterados)</strong></span>';
+                sigHtml = `
+                    <div class="rbac-card-section">
+                        <h5>Firma electrónica</h5>
+                        <p><strong>Firmante:</strong> ${escapeHtml(sig.signer_name)}</p>
+                        ${sig.signer_doc_id ? `<p><strong>Cédula:</strong> ${escapeHtml(sig.signer_doc_id)}</p>` : ''}
+                        <p><strong>Aceptó términos:</strong> ${sig.accepted ? 'Sí' : 'No'}</p>
+                        <p><strong>Firmado:</strong> ${escapeHtml(fmtDateTime(sig.signed_at))}</p>
+                        <p><strong>Integridad:</strong> ${integ}</p>
+                        <p><small><strong>SHA-256:</strong> <code style="word-break:break-all;">${escapeHtml(sig.content_hash)}</code></small></p>
+                    </div>`;
+            } else {
+                sigHtml = '<div class="rbac-card-section"><h5>Firma electrónica</h5><p class="empty-inline">Sin firma registrada.</p></div>';
+            }
+
+            // --- Bloque pasos del workflow ---
+            let stepsHtml;
+            if (steps.length > 0) {
+                stepsHtml = '<ul style="margin:0.4rem 0 0; padding-left:1.1rem;">' + steps.map(s => {
+                    const nivel = s.step_level === 'jefe' ? 'Jefe' : 'RRHH';
+                    const accion = s.action === 'approve' ? 'aprobó' : 'rechazó';
+                    const quien = s.approver_name || ('Usuario #' + s.approver_user_id);
+                    const comentario = s.comment ? ` — <em>"${escapeHtml(s.comment)}"</em>` : '';
+                    return `<li><strong>${escapeHtml(nivel)}</strong>: ${escapeHtml(quien)} ${accion} · ${escapeHtml(fmtDateTime(s.acted_at))}${comentario}</li>`;
+                }).join('') + '</ul>';
+            } else {
+                stepsHtml = '<p class="empty-inline">Todavía nadie actuó sobre esta solicitud.</p>';
+            }
+
+            // --- Bloque adjuntos (metadatos, sin binario) ---
+            let attachHtml;
+            if (attachments.length > 0) {
+                attachHtml = '<ul style="margin:0.4rem 0 0; padding-left:1.1rem;">' + attachments.map(a =>
+                    `<li>${escapeHtml(a.file_name)} <small>(${escapeHtml(a.mime_type)}${a.file_size ? ', ' + fmtSize(a.file_size) : ''}) · ${escapeHtml(fmtDateTime(a.uploaded_at))}</small></li>`
+                ).join('') + '</ul>';
+            } else {
+                attachHtml = '<p class="empty-inline">Sin justificativos adjuntos.</p>';
+            }
+
+            // --- Decisión de descuento (resumen) ---
+            const descLabel = {
+                pending:  'Pendiente de decisión',
+                discount: 'Descuenta saldo',
+                waived:   'Justificada sin descuento'
+            }[req.discount_decision] || req.discount_decision || '-';
+
+            body.innerHTML = `
+                <div class="rbac-context-card">
+                    <div class="rbac-card-section">
+                        <h4>${escapeHtml(tipoLabel(req.request_type))} · ${estadoBadgeHtml(req.status)}</h4>
+                        <p><strong>Descuento:</strong> ${escapeHtml(descLabel)}
+                           ${req.waived_reason ? `<br><small>Motivo: ${escapeHtml(req.waived_reason)}</small>` : ''}</p>
+                    </div>
+                    ${sigHtml}
+                    <div class="rbac-card-section">
+                        <h5>Pasos de aprobación</h5>
+                        ${stepsHtml}
+                    </div>
+                    <div class="rbac-card-section">
+                        <h5>Justificativos</h5>
+                        ${attachHtml}
+                    </div>
+                </div>
+            `;
+
+            // --- Acciones contextuales del pie del modal ---
+            const botones = [];
+            if (esPendiente(req.status)) {
+                // Subir adjunto: sólo tiene sentido mientras la solicitud está
+                // pendiente (el backend lo rechaza sobre estados terminales).
+                botones.push(`<button class="btn btn-outline" onclick="hrAdmin.uploadAttachmentFromDetail(${req.id})">Subir justificativo</button>`);
+            }
+            // Decisión de descuento (RRHH): aplica sobre pendiente de TTHH o
+            // aprobada, y nunca a feriado_compensado. Si el usuario no es RRHH,
+            // el backend responde 403 — el botón es cosmético.
+            const puedeDecidirDescuento =
+                !TIPOS_SIN_WAIVE.includes(req.request_type) &&
+                (req.status === 'pending_tthh' || req.status === 'approved');
+            if (puedeDecidirDescuento) {
+                botones.push(`<button class="btn btn-outline" onclick="hrAdmin.openDiscountDecision(${req.id})">Decisión de descuento</button>`);
+            }
+            actions.innerHTML = botones.join('');
+        } catch (err) {
+            body.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+        }
+    }
+
+    // Subir adjunto desde el modal de detalle y refrescar el detalle al volver.
+    async function uploadAttachmentFromDetail(id) {
+        const ok = await uploadAttachment(id);
+        if (ok && _currentTimeOffId === id) await renderTimeOffDetail(id);
+    }
+
+    // Formatea una fecha-hora ISO a algo legible y corto (sin segundos).
+    function fmtDateTime(s) {
+        if (!s) return '-';
+        const d = new Date(s);
+        if (isNaN(d.getTime())) return String(s);
+        return d.toLocaleString('es-EC', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+
+    // Tamaño de archivo legible (KB/MB) a partir de bytes.
+    function fmtSize(bytes) {
+        const n = Number(bytes) || 0;
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
     // ------------------------------------------------------------
@@ -816,6 +1307,7 @@ const hrAdmin = (function () {
             openRegisterAttendance, viewAttendance,
         loadTimeOff, openCreateTimeOff,
             approveTimeOff, rejectTimeOff, cancelTimeOff,
+            openTimeOffDetail, openDiscountDecision, uploadAttachmentFromDetail,
         // PR-3d Memos
         loadMemos, switchMemosView, openCreateMemo, viewMemo, ackCurrentMemo,
             onMemoTargetTypeChange

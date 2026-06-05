@@ -501,11 +501,14 @@
                                 <div class="rbac-filter-row">
                                     <label>Estado:</label>
                                     <select id="hr-time-off-status" onchange="hrAdmin.loadTimeOff()">
-                                        <option value="">Todos</option>
-                                        <option value="pending" selected>Pendientes</option>
+                                        <option value="" selected>Todos</option>
+                                        <option value="pending_jefe">Pendientes del jefe</option>
+                                        <option value="pending_tthh">Pendientes de RRHH</option>
                                         <option value="approved">Aprobadas</option>
                                         <option value="rejected">Rechazadas</option>
                                         <option value="cancelled">Canceladas</option>
+                                        <!-- 'pending' se conserva sólo para solicitudes históricas (pre-F1). -->
+                                        <option value="pending">Pendientes (histórico)</option>
                                     </select>
                                 </div>
                                 <div class="table-container">
@@ -1859,6 +1862,27 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline" onclick="closeModal('hr-memo-view-modal')">Cerrar</button>
                     <button type="button" id="hr-memo-view-ack-btn" class="btn btn-primary" onclick="hrAdmin.ackCurrentMemo()" style="display:none;">Acusar recibo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Detalle / Historial de solicitud de tiempo libre (F1) -->
+        <!-- Muestra la firma (con verificación de integridad), los pasos del
+             workflow multinivel, los justificativos adjuntos y, según el estado
+             y el rol, acciones contextuales (subir justificativo, decidir
+             descuento). El render lo arma hrAdmin.renderTimeOffDetail(). -->
+        <div id="hr-timeoff-detail-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Detalle de la solicitud</h3>
+                    <button class="btn-close" onclick="closeModal('hr-timeoff-detail-modal')">&times;</button>
+                </div>
+                <div class="modal-body" id="hr-timeoff-detail-body">
+                    <p class="loading">Cargando...</p>
+                </div>
+                <div class="modal-footer">
+                    <div id="hr-timeoff-detail-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;"></div>
+                    <button type="button" class="btn btn-outline" onclick="closeModal('hr-timeoff-detail-modal')">Cerrar</button>
                 </div>
             </div>
         </div>
