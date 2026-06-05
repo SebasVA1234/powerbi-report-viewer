@@ -46,6 +46,38 @@ const ATTACHMENT_REQUIRED_TYPES = ['permiso_personal', 'enfermedad'];
 // MIME types aceptados para adjuntos (PDF + imágenes).
 const ALLOWED_ATTACHMENT_MIME = ['application/pdf', 'image/png', 'image/jpeg'];
 
+// ---- Banco de días compensados: ÚNICA fuente de verdad ----
+// Estados de una solicitud 'feriado_compensado' que OCUPAN saldo del banco:
+// aprobadas + las "en vuelo" del workflow multinivel (tras F1 nace en
+// 'pending_tthh'). Se centraliza acá para que el cálculo del saldo, el guard de
+// creación y el guard de borrado de asistencia NUNCA se desincronicen: si se
+// agrega un estado nuevo al workflow, se actualiza UN solo lugar y no reaparece
+// el banco-negativo por update parcial.
+const COMPENSATED_ACTIVE_STATES = ['approved', 'pending', 'pending_jefe', 'pending_tthh'];
+
+// Saldo del banco compensado de un empleado: días acreditados por asistencia a
+// feriados MENOS los días ocupados por solicitudes feriado_compensado activas.
+// `conn` puede ser `db` o un `tx` de transacción (ambos exponen queryOne), así
+// que sirve dentro y fuera de una transacción. Devuelve { accrued, used, balance }.
+async function computeCompensatedBalance(conn, employeeId) {
+    const placeholders = COMPENSATED_ACTIVE_STATES.map(() => '?').join(',');
+    const creditRow = await conn.queryOne(
+        'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
+        [employeeId]
+    );
+    const usedRow = await conn.queryOne(
+        `SELECT COALESCE(SUM(days_count), 0) AS total
+         FROM time_off_requests
+         WHERE employee_id = ?
+           AND request_type = 'feriado_compensado'
+           AND status IN (${placeholders})`,
+        [employeeId, ...COMPENSATED_ACTIVE_STATES]
+    );
+    const accrued = Number(creditRow.total || 0);
+    const used = Number(usedRow.total || 0);
+    return { accrued, used, balance: accrued - used };
+}
+
 // Calcula el content_hash de la firma sobre la cadena canónica EXACTA del
 // hash_input de la spec. ATA el payload SUSTANTIVO de la solicitud (tipo,
 // fechas, días, motivo) ADEMÁS de la identidad del firmante. Orden y separador
@@ -555,8 +587,28 @@ class HrController {
             if (!employee_id) {
                 return res.status(400).json({ success: false, message: 'employee_id es requerido' });
             }
-            const credit = (days_credit !== undefined && !isNaN(Number(days_credit)))
-                ? Number(days_credit) : 1;
+            // El crédito alimenta el banco; la columna es NUMERIC(5,2) en Postgres
+            // (tope 999.99, 2 decimales) y REAL en SQLite. Sin validar: un valor
+            // enorme tira 500 SÓLO en Postgres (numeric field overflow) y uno
+            // negativo/0 corrompe el banco. Acotamos a un rango sano y a 2 decimales.
+            let credit = 1; // default: 1 día por feriado trabajado
+            if (days_credit !== undefined && days_credit !== null && String(days_credit).trim() !== '') {
+                const c = Number(days_credit);
+                if (!Number.isFinite(c) || c <= 0 || c > 30) {
+                    return res.status(400).json({ success: false, message: 'days_credit debe ser un número mayor a 0 y hasta 30' });
+                }
+                credit = Math.round(c * 100) / 100; // máx 2 decimales (igual que NUMERIC(5,2))
+            }
+            // hours_worked es opcional/informativo; si viene, lo acotamos a 0–24
+            // para no romper la columna numérica en Postgres ni guardar absurdos.
+            let hours = null;
+            if (hours_worked !== undefined && hours_worked !== null && String(hours_worked).trim() !== '') {
+                const h = Number(hours_worked);
+                if (!Number.isFinite(h) || h < 0 || h > 24) {
+                    return res.status(400).json({ success: false, message: 'hours_worked debe ser un número entre 0 y 24' });
+                }
+                hours = Math.round(h * 100) / 100;
+            }
 
             const upsertSql = db.driver === 'sqlite'
                 ? `INSERT INTO holiday_attendance
@@ -577,7 +629,7 @@ class HrController {
                                  notes         = EXCLUDED.notes`;
             await db.execute(upsertSql, [
                 id, employee_id, schedule_text || null,
-                hours_worked || null, credit, notes || null, req.user.id
+                hours, credit, notes || null, req.user.id
             ]);
             res.status(201).json({ success: true, message: 'Asistencia registrada' });
         } catch (err) {
@@ -589,8 +641,21 @@ class HrController {
     static async deleteAttendance(req, res) {
         try {
             const { attendanceId } = req.params;
-            const r = await db.queryOne('SELECT id FROM holiday_attendance WHERE id = ?', [attendanceId]);
+            const r = await db.queryOne('SELECT id, employee_id, days_credit FROM holiday_attendance WHERE id = ?', [attendanceId]);
             if (!r) return res.status(404).json({ success: false, message: 'Registro no encontrado' });
+
+            // Integridad del banco: borrar este registro resta `days_credit` del
+            // saldo. Si el disponible actual es MENOR a ese crédito, el banco quedaría
+            // negativo (ya hay días consumidos por solicitudes feriado_compensado en
+            // vuelo/aprobadas que dependen de él). Lo bloqueamos con 409; RRHH debe
+            // cancelar primero esas solicitudes.
+            const { balance } = await computeCompensatedBalance(db, r.employee_id);
+            if (balance < Number(r.days_credit || 0)) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'No se puede borrar: el empleado ya usó días compensados que dependen de este crédito. Cancelá primero esas solicitudes de feriado compensado.'
+                });
+            }
             await db.execute('DELETE FROM holiday_attendance WHERE id = ?', [attendanceId]);
             res.json({ success: true, message: 'Asistencia eliminada' });
         } catch (err) {
@@ -619,35 +684,18 @@ class HrController {
                 }
             }
 
-            const credit = await db.queryOne(`
-                SELECT COALESCE(SUM(days_credit), 0) AS total
-                FROM holiday_attendance
-                WHERE employee_id = ?
-            `, [id]);
-
-            // PR-3c: descontar solicitudes de tipo 'feriado_compensado' que
-            // gastan del banco. F1 (regresión doble-gasto): cuenta también los
-            // estados intermedios del workflow multinivel. Una solicitud EN VUELO
-            // (que nace en 'pending_tthh' para feriado_compensado) debe seguir
-            // restando del disponible aunque TTHH todavía no la apruebe; si no,
-            // el empleado podría gastar dos veces el mismo crédito.
-            const usedRow = await db.queryOne(`
-                SELECT COALESCE(SUM(days_count), 0) AS total
-                FROM time_off_requests
-                WHERE employee_id = ?
-                  AND request_type = 'feriado_compensado'
-                  AND status IN ('approved','pending','pending_jefe','pending_tthh')
-            `, [id]);
-            const used = Number(usedRow.total || 0);
-            const accrued = Number(credit.total || 0);
-
+            // Saldo = créditos por asistencia − días ocupados por solicitudes
+            // feriado_compensado activas (incluye las EN VUELO del workflow, que
+            // nacen en 'pending_tthh': si no se contaran, el empleado gastaría dos
+            // veces el mismo crédito). Cálculo centralizado en computeCompensatedBalance.
+            const { accrued, used, balance } = await computeCompensatedBalance(db, id);
             res.json({
                 success: true,
                 data: {
                     employee_id: Number(id),
                     days_accrued: accrued,
                     days_used: used,
-                    balance: accrued - used
+                    balance
                 }
             });
         } catch (err) {
@@ -985,18 +1033,7 @@ class HrController {
 
             // ---- Saldo del banco (feriado_compensado no puede dejar el banco en negativo) ----
             if (request_type === 'feriado_compensado') {
-                const credit = await db.queryOne(
-                    'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
-                    [targetEmployee.id]
-                );
-                const used = await db.queryOne(`
-                    SELECT COALESCE(SUM(days_count), 0) AS total
-                    FROM time_off_requests
-                    WHERE employee_id = ?
-                      AND request_type = 'feriado_compensado'
-                      AND status IN ('approved','pending','pending_jefe','pending_tthh')
-                `, [targetEmployee.id]);
-                const balance = Number(credit.total || 0) - Number(used.total || 0);
+                const { balance } = await computeCompensatedBalance(db, targetEmployee.id);
                 if (days > balance) {
                     return res.status(400).json({ success: false, message: `Saldo insuficiente. Disponible: ${balance} día(s), pediste ${days}.` });
                 }
@@ -1018,6 +1055,28 @@ class HrController {
             // así que insertamos la solicitud, calculamos el hash y luego la firma
             // dentro de la misma transacción. Si algo falla, rollback total.
             const result = await db.transaction(async (tx) => {
+                // TOCTOU-safe: el chequeo de saldo de arriba es PRE-transacción (UX
+                // rápida y mensaje claro), pero dos solicitudes concurrentes del MISMO
+                // empleado podrían pasarlo a la vez y gastar el crédito dos veces. Acá,
+                // ya dentro de la tx, RE-validamos el saldo de forma autoritativa.
+                if (request_type === 'feriado_compensado') {
+                    // En Postgres (READ COMMITTED) tomamos un advisory lock por empleado
+                    // para serializar estas creaciones; se libera solo al cerrar la tx.
+                    // En SQLite no hace falta: better-sqlite3 es sync y de conexión única,
+                    // así que la transacción ya serializa el proceso.
+                    if (db.driver === 'postgres') {
+                        await tx.query('SELECT pg_advisory_xact_lock(?::bigint)', [targetEmployee.id]);
+                    }
+                    // Re-lectura AUTORITATIVA del saldo dentro de la tx (misma fuente
+                    // de verdad que el resto del banco), ya serializada por el lock.
+                    const { balance: txBalance } = await computeCompensatedBalance(tx, targetEmployee.id);
+                    if (days > txBalance) {
+                        const e = new Error(`Saldo insuficiente. Disponible: ${txBalance} día(s), pediste ${days}.`);
+                        e.statusCode = 400; // lo honra el catch → 400 limpio, no 500
+                        throw e;
+                    }
+                }
+
                 const reqInsert = await tx.execute(
                     `INSERT INTO time_off_requests
                      (employee_id, request_type, date_from, date_to, days_count, reason, status, discount_decision, requested_by)
@@ -1069,6 +1128,12 @@ class HrController {
                 }
             });
         } catch (err) {
+            // Errores con statusCode explícito (ej. saldo insuficiente detectado
+            // dentro de la transacción TOCTOU-safe) se devuelven tal cual; el resto
+            // es un 500 genérico (sin filtrar detalles internos).
+            if (err && err.statusCode) {
+                return res.status(err.statusCode).json({ success: false, message: err.message });
+            }
             console.error('crearSolicitudFirmada:', err);
             res.status(500).json({ success: false, message: 'Error al crear la solicitud firmada' });
         }
