@@ -714,146 +714,6 @@ class HrController {
         }
     }
 
-    // Crear solicitud. Empleado pide para sí mismo; RRHH/Gerencia pueden
-    // crear en nombre de cualquier empleado.
-    static async createTimeOffRequest(req, res) {
-        try {
-            const { employee_id, request_type, date_from, date_to, days_count, reason } = req.body;
-            if (!request_type || !date_from || !date_to || !days_count) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'request_type, date_from, date_to y days_count son requeridos'
-                });
-            }
-            const validTypes = ['vacaciones','feriado_compensado','permiso_personal','enfermedad','otro'];
-            if (!validTypes.includes(request_type)) {
-                return res.status(400).json({
-                    success: false,
-                    message: `request_type inválido. Válidos: ${validTypes.join(', ')}`
-                });
-            }
-            if (date_from > date_to) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'date_from no puede ser posterior a date_to'
-                });
-            }
-
-            // Resolver el employee_id objetivo.
-            let targetEmpId = employee_id;
-            const ctx = await getUserContext(req.user.id, req);
-            const canCreateForOthers = ctx.isAdmin || ctx.permissions.has('hr.read.all');
-
-            if (!targetEmpId) {
-                // Sin employee_id explícito: solicitar para sí mismo.
-                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
-                if (!me) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'No tienes perfil de empleado. Pedí a RRHH que te lo cree.'
-                    });
-                }
-                targetEmpId = me.id;
-            } else if (!canCreateForOthers) {
-                // Tiene employee_id explícito pero no es admin/RRHH: solo puede ser él mismo.
-                const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
-                if (!me || me.id !== Number(targetEmpId)) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Solo podés solicitar días libres para vos mismo.'
-                    });
-                }
-            }
-
-            // Si tipo='feriado_compensado', validar saldo (no permite ir a negativo).
-            if (request_type === 'feriado_compensado') {
-                const credit = await db.queryOne(
-                    'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
-                    [targetEmpId]
-                );
-                const usedApproved = await db.queryOne(`
-                    SELECT COALESCE(SUM(days_count), 0) AS total
-                    FROM time_off_requests
-                    WHERE employee_id = ?
-                      AND request_type = 'feriado_compensado'
-                      AND status IN ('approved','pending','pending_jefe','pending_tthh')
-                `, [targetEmpId]);
-                const balance = Number(credit.total || 0) - Number(usedApproved.total || 0);
-                if (Number(days_count) > balance) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Saldo insuficiente. Disponible: ${balance} día(s), pediste ${days_count}.`
-                    });
-                }
-            }
-
-            // F1: el status se DERIVA server-side del tipo (el cliente nunca lo
-            // envía). SÓLO 'vacaciones' pasa por el jefe; el resto es RRHH-directo.
-            const initialStatus = HrController.deriveInitialStatus(request_type);
-            const r = await db.execute(
-                `INSERT INTO time_off_requests
-                 (employee_id, request_type, date_from, date_to, days_count, reason, status, requested_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [targetEmpId, request_type, date_from, date_to, days_count, reason || null, initialStatus, req.user.id]
-            );
-            res.status(201).json({ success: true, data: { id: r.lastInsertId, status: initialStatus } });
-        } catch (err) {
-            console.error('createTimeOffRequest:', err);
-            res.status(500).json({ success: false, message: 'Error al crear solicitud' });
-        }
-    }
-
-    static async approveTimeOffRequest(req, res) {
-        try {
-            const { id } = req.params;
-            const r = await db.queryOne('SELECT id, status FROM time_off_requests WHERE id = ?', [id]);
-            if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
-            if (r.status !== 'pending') {
-                return res.status(400).json({
-                    success: false,
-                    message: `La solicitud ya está en estado '${r.status}'`
-                });
-            }
-            await db.execute(
-                `UPDATE time_off_requests
-                 SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = ?`,
-                [req.user.id, id]
-            );
-            res.json({ success: true, message: 'Solicitud aprobada' });
-        } catch (err) {
-            console.error('approveTimeOffRequest:', err);
-            res.status(500).json({ success: false, message: 'Error al aprobar' });
-        }
-    }
-
-    static async rejectTimeOffRequest(req, res) {
-        try {
-            const { id } = req.params;
-            const { reason } = req.body || {};
-            const r = await db.queryOne('SELECT id, status FROM time_off_requests WHERE id = ?', [id]);
-            if (!r) return res.status(404).json({ success: false, message: 'Solicitud no encontrada' });
-            if (r.status !== 'pending') {
-                return res.status(400).json({
-                    success: false,
-                    message: `La solicitud ya está en estado '${r.status}'`
-                });
-            }
-            await db.execute(
-                `UPDATE time_off_requests
-                 SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
-                     rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = ?`,
-                [req.user.id, reason || null, id]
-            );
-            res.json({ success: true, message: 'Solicitud rechazada' });
-        } catch (err) {
-            console.error('rejectTimeOffRequest:', err);
-            res.status(500).json({ success: false, message: 'Error al rechazar' });
-        }
-    }
-
     // El dueño (o RRHH/admin) cancela su solicitud mientras siga PENDIENTE.
     // F1: el guard se amplió de `=== 'pending'` al conjunto pendiente del
     // workflow multinivel (una solicitud nueva nace en pending_jefe/pending_tthh
@@ -1045,8 +905,8 @@ class HrController {
     // La firma se valida server-side (nombre exacto en mayúsculas, cédula
     // numérica, checkbox true); si no valida → 422 y NO se crea nada (atómico).
     // El estado inicial se deriva del tipo. El content_hash ata el payload
-    // sustantivo + identidad. Reusa la regla de createTimeOffRequest: un
-    // empleado sólo firma para sí mismo; RRHH/admin pueden crear por otro.
+    // sustantivo + identidad. Regla de autoría: un empleado sólo firma para
+    // sí mismo; RRHH/admin pueden crear en nombre de otro.
     static async crearSolicitudFirmada(req, res) {
         try {
             const { employee_id, request_type, date_from, date_to, days_count, reason, signature } = req.body;
@@ -1079,7 +939,7 @@ class HrController {
                 return res.status(400).json({ success: false, message: 'signer_name y signer_doc_id son obligatorios' });
             }
 
-            // ---- Resolver el empleado objetivo (mismo criterio que createTimeOffRequest) ----
+            // ---- Resolver el empleado objetivo (empleado para sí mismo; RRHH/admin por otro) ----
             const ctx = await getUserContext(req.user.id, req);
             const canCreateForOthers = ctx.isAdmin || ctx.permissions.has('hr.read.all');
             let targetEmployee;
@@ -1123,7 +983,7 @@ class HrController {
                 return res.status(422).json({ success: false, message: 'El nombre firmado no coincide con el nombre del empleado' });
             }
 
-            // ---- Saldo del banco (mismo guard que createTimeOffRequest, en vuelo ampliado) ----
+            // ---- Saldo del banco (feriado_compensado no puede dejar el banco en negativo) ----
             if (request_type === 'feriado_compensado') {
                 const credit = await db.queryOne(
                     'SELECT COALESCE(SUM(days_credit), 0) AS total FROM holiday_attendance WHERE employee_id = ?',
