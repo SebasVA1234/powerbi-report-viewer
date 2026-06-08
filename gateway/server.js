@@ -22,10 +22,12 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Destino PRIVADO: el servicio backend en la red interna de Railway. Se setea por
-// env para no hardcodear; el default apunta al nombre interno del servicio actual.
-// El backend escucha en el puerto 3000 (ver su Dockerfile).
-const BACKEND_URL = process.env.BACKEND_URL || 'http://powerbi-report-viewer.railway.internal:3000';
+// Destino PRIVADO: el servicio backend en la red interna de Railway. Overridable
+// por env (BACKEND_URL); el default apunta al nombre interno del servicio actual.
+// OJO con el puerto: el backend NO escucha en el 3000 de su Dockerfile — Railway
+// le inyecta su propio PORT (8080). Verificado en el dashboard de Railway
+// (Networking → "Port 8080"). Para red privada se usa ese mismo puerto.
+const BACKEND_URL = process.env.BACKEND_URL || 'http://powerbi-report-viewer.railway.internal:8080';
 
 // Detrás del proxy de Railway: confiamos en X-Forwarded-* para ver la IP real del
 // cliente (si no, el rate-limit contaría todo como una sola IP, la del borde).

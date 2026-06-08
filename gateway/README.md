@@ -26,7 +26,7 @@ flowchart LR
 | Var | Default | Para qué |
 |---|---|---|
 | `PORT` | `8080` | puerto del gateway (Railway lo inyecta) |
-| `BACKEND_URL` | `http://powerbi-report-viewer.railway.internal:3000` | URL **interna** del backend |
+| `BACKEND_URL` | `http://powerbi-report-viewer.railway.internal:8080` | URL **interna** del backend (puerto = PORT que Railway le asigna a la app, **8080**) |
 | `GATEWAY_RATE_MAX` | `1000` | máx requests por ventana (rate-limit de borde) |
 | `GATEWAY_RATE_WINDOW_MS` | `900000` | ventana del rate-limit (15 min) |
 
@@ -38,7 +38,8 @@ flowchart LR
    `+ New` → `GitHub Repo` → `ecualand-innovacion/powerbi-report-viewer`.
 2. En el servicio nuevo → **Settings** → **Source** → **Root Directory** = `gateway`.
    (Así usa `gateway/Dockerfile` y `gateway/railway.toml`.)
-3. **Variables** del gateway → agregar `BACKEND_URL=http://powerbi-report-viewer.railway.internal:3000`.
+3. **Variables** del gateway → `BACKEND_URL` ya viene en el default del código
+   (`...railway.internal:8080`); sólo setealo si el puerto/nombre del backend cambia.
 4. **Networking** del gateway → **Generate Domain** (dominio TEMPORAL para probar).
 5. **Probar** con ese dominio temporal: abrir la app, loguear, navegar. Todo debe
    andar igual (el gateway reenvía al backend, que sigue público en este punto).
