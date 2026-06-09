@@ -61,7 +61,6 @@ const MAX_EMPLOYEE_IDS = 5000;
 // Constantes del cálculo legal (Ecuador).
 const MESES_DEL_ANIO = 12;       // décimos mensualizados se dividen por 12
 const PORCENTAJE_BASE = 100;     // los % se aplican como valor/100
-const DIAS_POR_ANIO = 365.25;    // antigüedad en años (incluye bisiestos promedio)
 
 
 // ============================================================
@@ -72,7 +71,12 @@ const DIAS_POR_ANIO = 365.25;    // antigüedad en años (incluye bisiestos prom
 // Math.round(x*100)/100). Se aplica por componente Y por total para que el
 // desglose y el total del PDF no descuadren centavos.
 function round2(x) {
-    return Math.round((Number(x) || 0) * 100) / 100;
+    const n = Number(x) || 0;
+    // Half-up a 2 decimales, ROBUSTO al error de representación IEEE754. Sin el
+    // factor relativo (1+EPSILON), p.ej. 1.005*100 = 100.4999... bajaría mal a 1.00
+    // → −1 centavo vs la planilla de Contabilidad. El factor corrige ese sesgo en
+    // TODO el rango de sueldos (los montos de nómina son siempre >= 0).
+    return Math.round(n * 100 * (1 + Number.EPSILON)) / 100;
 }
 
 // ¿El solicitante puede ver los total_* y TODOS los renglones? Gate único de PII.
@@ -110,18 +114,28 @@ function parseWarnings(raw) {
     return Array.isArray(raw) ? raw : [];
 }
 
-// Antigüedad en años a una fecha de corte. Usamos el ÚLTIMO día del período de
-// la corrida (no la fecha actual) para que un rol pasado sea reproducible. Si no
-// hay hire_date, devolvemos 0 (no califica para fondos). Dual-driver: hire_date
-// llega como string 'YYYY-MM-DD' (SQLite) o Date (Postgres); new Date(...) cubre
-// ambos.
-function antiguedadEnAnios(hireDate, cutoffDate) {
-    if (!hireDate) return 0;
-    const hire = new Date(hireDate);
-    if (Number.isNaN(hire.getTime())) return 0;
-    const diffMs = cutoffDate.getTime() - hire.getTime();
-    if (diffMs <= 0) return 0;
-    return diffMs / (DIAS_POR_ANIO * 24 * 60 * 60 * 1000);
+// ¿El empleado superó (estricto) 1 año de antigüedad para la fecha de corte?
+// Comparación por FECHAS CALENDARIO (NO por días/365.25): el primer aniversario
+// (hire_date + 1 año) debe ser ANTERIOR al último día del período. Así maneja
+// bisiestos y meses de distinto largo sin el sesgo de centésimas de año, y un rol
+// pasado es reproducible (la antigüedad se mide al fin del período, no a "hoy").
+// Dual-driver + TZ-safe: SQLite da 'YYYY-MM-DD' (string), Postgres da Date;
+// comparamos claves enteras YYYYMMDD para no depender de husos horarios.
+function superoUnAnio(hireDate, cutoffDate) {
+    if (!hireDate) return false;
+    let hy, hm, hd;
+    if (typeof hireDate === 'string') {
+        const mt = hireDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!mt) return false;
+        hy = +mt[1]; hm = +mt[2]; hd = +mt[3];
+    } else {
+        const dt = new Date(hireDate);
+        if (Number.isNaN(dt.getTime())) return false;
+        hy = dt.getUTCFullYear(); hm = dt.getUTCMonth() + 1; hd = dt.getUTCDate();
+    }
+    const annivKey = (hy + 1) * 10000 + hm * 100 + hd;  // YYYYMMDD del 1er aniversario
+    const cutKey = cutoffDate.getFullYear() * 10000 + (cutoffDate.getMonth() + 1) * 100 + cutoffDate.getDate();
+    return annivKey < cutKey;  // estricto: aniversario ANTES del corte ⇒ > 1 año
 }
 
 // Último día del período (mes/año) como Date — fecha de corte de la antigüedad.
@@ -227,12 +241,11 @@ function calcularRenglonEmpleado(employee, params, periodMonth, periodYear) {
     // La antigüedad se mide al ÚLTIMO día del período (reproducible).
     let fondosReserva = 0;
     const cutoff = ultimoDiaDelPeriodo(periodMonth, periodYear);
-    const anios = antiguedadEnAnios(employee.hire_date, cutoff);
     if (pagaFondosMensual) {
-        if (anios > 1) {
+        if (superoUnAnio(employee.hire_date, cutoff)) {
             fondosReserva = round2(sueldoBase * params.fondos_reserva_pct / PORCENTAJE_BASE);
         } else {
-            // Edge case §6.2: pidió fondos pero aún no cumple 1 año → 0 + warning.
+            // Edge case §6.2: pidió fondos pero aún no superó 1 año → 0 + warning.
             warnings.push('antiguedad <= 1 anio: fondos de reserva en 0');
         }
     }
