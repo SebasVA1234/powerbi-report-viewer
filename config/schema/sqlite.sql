@@ -433,6 +433,8 @@ CREATE TABLE IF NOT EXISTS hr_employees (
     manager_id INTEGER,           -- FK a hr_employees.id (jefe directo)
     hire_date DATE,
     base_salary REAL,             -- nullable: Fase 6 (nómina) lo carga
+    mensualiza_decimos  INTEGER NOT NULL DEFAULT 0,   -- Nómina v1.2: 1=mensualiza décimos 13/14
+    paga_fondos_mensual INTEGER NOT NULL DEFAULT 0,   -- Nómina v1.2: 1=paga fondos de reserva mensual (antigüedad > 1 año)
     status TEXT DEFAULT 'active' CHECK(status IN ('active','terminated','on_leave')),
     address TEXT,
     notes TEXT,
@@ -663,3 +665,102 @@ CREATE TABLE IF NOT EXISTS hr_memo_acknowledgments (
 CREATE INDEX IF NOT EXISTS idx_hr_memos_target ON hr_memos(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_hr_memos_issued ON hr_memos(issued_at);
 CREATE INDEX IF NOT EXISTS idx_hr_memo_acks_user ON hr_memo_acknowledgments(user_id);
+
+-- ============================================================
+-- Nómina / Roles de pago (v1.2) — 3 tablas (las 2 cols de hr_employees las agrega migratePayrollV1)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payroll_parameters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,                 -- snake_case; patrón ^[a-z][a-z0-9_]{1,49}$ validado en app
+    label TEXT NOT NULL,                      -- etiqueta legible para la pantalla de configuración
+    value_type TEXT NOT NULL CHECK(value_type IN ('percentage','money','number')),
+    value REAL NOT NULL,                      -- NUMERIC(12,4) en PG: 4 decimales cubren % finos (8.33) y montos
+    unit TEXT,                                -- '%', 'USD' (informativo)
+    description TEXT,                          -- base legal / ayuda
+    updated_by INTEGER,                       -- FK users(id) — auditoría del último cambio
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES users (id)
+);
+
+
+-- -----------------------------------------------------------------------------
+-- (B.2) payroll_runs — cabecera de una corrida mensual (snapshot inmutable).
+-- UNIQUE(period_month, period_year): una sola corrida por mes (re-POST → 409).
+-- Estado draft → finalized; finalized es el cierre sellado del rol del mes.
+-- Los total_* son masa salarial AGREGADA → NUMERIC(14,2) en PG (REAL acá).
+CREATE TABLE IF NOT EXISTS payroll_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_month INTEGER NOT NULL,            -- 1..12 (validado en app)
+    period_year INTEGER NOT NULL,             -- 2000..2100 (validado en app)
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),
+    sbu_snapshot REAL NOT NULL,               -- SBU congelado al generar (NUMERIC(12,2) en PG)
+    total_ingresos REAL NOT NULL DEFAULT 0,   -- agregado (NUMERIC(14,2) en PG)
+    total_descuentos REAL NOT NULL DEFAULT 0, -- agregado (NUMERIC(14,2) en PG)
+    total_neto REAL NOT NULL DEFAULT 0,       -- agregado (NUMERIC(14,2) en PG)
+    total_costo_empresa REAL NOT NULL DEFAULT 0, -- agregado (NUMERIC(14,2) en PG)
+    notes TEXT,
+    generated_by INTEGER NOT NULL,            -- FK users(id) — auditoría
+    finalized_by INTEGER,                     -- FK users(id), nullable
+    finalized_at DATETIME,                    -- nullable
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (period_month, period_year),
+    FOREIGN KEY (generated_by) REFERENCES users (id),
+    FOREIGN KEY (finalized_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+
+
+-- -----------------------------------------------------------------------------
+-- (B.3) payroll_details — renglón de rol de pago por empleado (SNAPSHOT).
+-- Congela los % de parámetros + SBU + banderas del empleado usados al calcular:
+-- editar un parámetro a futuro NO cambia este registro (rol auditablemente
+-- inmutable). UNIQUE(run_id, employee_id): un renglón por empleado por corrida.
+-- Montos por-renglón → NUMERIC(12,2) en PG (REAL acá), alineados a base_salary.
+CREATE TABLE IF NOT EXISTS payroll_details (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+
+    -- Ingresos
+    sueldo_base REAL NOT NULL DEFAULT 0,      -- 0 si base_salary NULL
+    fondos_reserva REAL NOT NULL DEFAULT 0,
+    decimo_tercero REAL NOT NULL DEFAULT 0,
+    decimo_cuarto REAL NOT NULL DEFAULT 0,
+    horas_extra REAL NOT NULL DEFAULT 0,      -- v1: siempre 0 (campo presente para futuro)
+    otros_ingresos REAL NOT NULL DEFAULT 0,   -- v1: manual, default 0
+    total_ingresos REAL NOT NULL DEFAULT 0,
+
+    -- Descuentos
+    base_aportable REAL NOT NULL DEFAULT 0,   -- base del aporte personal IESS
+    aporte_personal REAL NOT NULL DEFAULT 0,
+    otros_descuentos REAL NOT NULL DEFAULT 0, -- v1: manual, default 0
+    total_descuentos REAL NOT NULL DEFAULT 0,
+
+    -- Resultado
+    neto_a_pagar REAL NOT NULL DEFAULT 0,     -- ingresos − descuentos
+
+    -- Costo empresa (informativo, no afecta el neto)
+    aporte_patronal REAL NOT NULL DEFAULT 0,
+    provisiones REAL NOT NULL DEFAULT 0,
+    costo_empresa REAL NOT NULL DEFAULT 0,
+
+    -- Snapshot de parámetros (INMUTABILIDAD)
+    iess_personal_pct_snapshot REAL NOT NULL,   -- NUMERIC(8,4) en PG
+    iess_patronal_pct_snapshot REAL NOT NULL,   -- NUMERIC(8,4) en PG
+    fondos_reserva_pct_snapshot REAL NOT NULL,  -- NUMERIC(8,4) en PG
+    sbu_snapshot REAL NOT NULL,                 -- NUMERIC(12,2) en PG (base del décimo 14)
+    mensualiza_decimos_snapshot INTEGER NOT NULL DEFAULT 0,   -- bandera congelada 0/1 (required en el contrato)
+    paga_fondos_mensual_snapshot INTEGER NOT NULL DEFAULT 0,  -- bandera congelada 0/1 (required en el contrato)
+
+    warnings_json TEXT,                         -- JSON array de avisos no fatales (TEXT/TEXT, no JSONB; ver 13-notes.md §1.3)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (run_id, employee_id),
+    FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_details_emp ON payroll_details(employee_id);

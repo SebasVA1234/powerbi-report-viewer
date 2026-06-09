@@ -370,6 +370,196 @@ async function migrateUsersAuthFields() {
     }
 }
 
+async function migratePayrollV1() {
+    const isPg = db.driver === 'postgres';
+
+    // ---- (a) Tablas de nómina disponibles también en prod (idempotente). ----
+    // Tipos por-driver: REAL (SQLite) vs NUMERIC(p,s) (PG); AUTOINCREMENT vs
+    // SERIAL; DATETIME vs TIMESTAMP. Coinciden EXACTO con config/schema/*.sql.
+    if (isPg) {
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS payroll_parameters (
+                id SERIAL PRIMARY KEY,
+                key TEXT UNIQUE NOT NULL,
+                label TEXT NOT NULL,
+                value_type TEXT NOT NULL CHECK(value_type IN ('percentage','money','number')),
+                value NUMERIC(12,4) NOT NULL,
+                unit TEXT,
+                description TEXT,
+                updated_by INTEGER,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (updated_by) REFERENCES users (id)
+            );
+            CREATE TABLE IF NOT EXISTS payroll_runs (
+                id SERIAL PRIMARY KEY,
+                period_month INTEGER NOT NULL,
+                period_year INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),
+                sbu_snapshot NUMERIC(12,2) NOT NULL,
+                total_ingresos NUMERIC(14,2) NOT NULL DEFAULT 0,
+                total_descuentos NUMERIC(14,2) NOT NULL DEFAULT 0,
+                total_neto NUMERIC(14,2) NOT NULL DEFAULT 0,
+                total_costo_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                notes TEXT,
+                generated_by INTEGER NOT NULL,
+                finalized_by INTEGER,
+                finalized_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (period_month, period_year),
+                FOREIGN KEY (generated_by) REFERENCES users (id),
+                FOREIGN KEY (finalized_by) REFERENCES users (id)
+            );
+            CREATE TABLE IF NOT EXISTS payroll_details (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                employee_id INTEGER NOT NULL,
+                sueldo_base NUMERIC(12,2) NOT NULL DEFAULT 0,
+                fondos_reserva NUMERIC(12,2) NOT NULL DEFAULT 0,
+                decimo_tercero NUMERIC(12,2) NOT NULL DEFAULT 0,
+                decimo_cuarto NUMERIC(12,2) NOT NULL DEFAULT 0,
+                horas_extra NUMERIC(12,2) NOT NULL DEFAULT 0,
+                otros_ingresos NUMERIC(12,2) NOT NULL DEFAULT 0,
+                total_ingresos NUMERIC(12,2) NOT NULL DEFAULT 0,
+                base_aportable NUMERIC(12,2) NOT NULL DEFAULT 0,
+                aporte_personal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                otros_descuentos NUMERIC(12,2) NOT NULL DEFAULT 0,
+                total_descuentos NUMERIC(12,2) NOT NULL DEFAULT 0,
+                neto_a_pagar NUMERIC(12,2) NOT NULL DEFAULT 0,
+                aporte_patronal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                provisiones NUMERIC(12,2) NOT NULL DEFAULT 0,
+                costo_empresa NUMERIC(12,2) NOT NULL DEFAULT 0,
+                iess_personal_pct_snapshot NUMERIC(8,4) NOT NULL,
+                iess_patronal_pct_snapshot NUMERIC(8,4) NOT NULL,
+                fondos_reserva_pct_snapshot NUMERIC(8,4) NOT NULL,
+                sbu_snapshot NUMERIC(12,2) NOT NULL,
+                mensualiza_decimos_snapshot INTEGER NOT NULL DEFAULT 0,
+                paga_fondos_mensual_snapshot INTEGER NOT NULL DEFAULT 0,
+                warnings_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (run_id, employee_id),
+                FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
+            CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+            CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id);
+            CREATE INDEX IF NOT EXISTS idx_payroll_details_emp ON payroll_details(employee_id);
+        `);
+    } else {
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS payroll_parameters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT UNIQUE NOT NULL,
+                label TEXT NOT NULL,
+                value_type TEXT NOT NULL CHECK(value_type IN ('percentage','money','number')),
+                value REAL NOT NULL,
+                unit TEXT,
+                description TEXT,
+                updated_by INTEGER,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (updated_by) REFERENCES users (id)
+            );
+            CREATE TABLE IF NOT EXISTS payroll_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                period_month INTEGER NOT NULL,
+                period_year INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),
+                sbu_snapshot REAL NOT NULL,
+                total_ingresos REAL NOT NULL DEFAULT 0,
+                total_descuentos REAL NOT NULL DEFAULT 0,
+                total_neto REAL NOT NULL DEFAULT 0,
+                total_costo_empresa REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                generated_by INTEGER NOT NULL,
+                finalized_by INTEGER,
+                finalized_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (period_month, period_year),
+                FOREIGN KEY (generated_by) REFERENCES users (id),
+                FOREIGN KEY (finalized_by) REFERENCES users (id)
+            );
+            CREATE TABLE IF NOT EXISTS payroll_details (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                employee_id INTEGER NOT NULL,
+                sueldo_base REAL NOT NULL DEFAULT 0,
+                fondos_reserva REAL NOT NULL DEFAULT 0,
+                decimo_tercero REAL NOT NULL DEFAULT 0,
+                decimo_cuarto REAL NOT NULL DEFAULT 0,
+                horas_extra REAL NOT NULL DEFAULT 0,
+                otros_ingresos REAL NOT NULL DEFAULT 0,
+                total_ingresos REAL NOT NULL DEFAULT 0,
+                base_aportable REAL NOT NULL DEFAULT 0,
+                aporte_personal REAL NOT NULL DEFAULT 0,
+                otros_descuentos REAL NOT NULL DEFAULT 0,
+                total_descuentos REAL NOT NULL DEFAULT 0,
+                neto_a_pagar REAL NOT NULL DEFAULT 0,
+                aporte_patronal REAL NOT NULL DEFAULT 0,
+                provisiones REAL NOT NULL DEFAULT 0,
+                costo_empresa REAL NOT NULL DEFAULT 0,
+                iess_personal_pct_snapshot REAL NOT NULL,
+                iess_patronal_pct_snapshot REAL NOT NULL,
+                fondos_reserva_pct_snapshot REAL NOT NULL,
+                sbu_snapshot REAL NOT NULL,
+                mensualiza_decimos_snapshot INTEGER NOT NULL DEFAULT 0,
+                paga_fondos_mensual_snapshot INTEGER NOT NULL DEFAULT 0,
+                warnings_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (run_id, employee_id),
+                FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
+            CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+            CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id);
+            CREATE INDEX IF NOT EXISTS idx_payroll_details_emp ON payroll_details(employee_id);
+        `);
+    }
+
+    // ---- (b) Columnas de mensualización en hr_employees (DBs existentes). ----
+    // Las dos son INTEGER 0/1; NOT NULL DEFAULT 0 es seguro sobre filas viejas.
+    const EMPLOYEE_FLAG_COLUMNS = ['mensualiza_decimos', 'paga_fondos_mensual'];
+    if (isPg) {
+        const cols = await db.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'hr_employees'"
+        );
+        const have = new Set(cols.map(c => c.column_name));
+        for (const name of EMPLOYEE_FLAG_COLUMNS) {
+            if (!have.has(name)) {
+                await db.exec(`ALTER TABLE hr_employees ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`);
+                console.log(`🔧 Migración Nómina: columna ${name} añadida a hr_employees`);
+            }
+        }
+    } else {
+        const cols = await db.query('PRAGMA table_info(hr_employees)');
+        const have = new Set(cols.map(c => c.name));
+        for (const name of EMPLOYEE_FLAG_COLUMNS) {
+            if (!have.has(name)) {
+                await db.exec(`ALTER TABLE hr_employees ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`);
+                console.log(`🔧 Migración Nómina: columna ${name} añadida a hr_employees`);
+            }
+        }
+    }
+
+    // ---- (c) Seed de los 4 parámetros legales (idempotente por key). ----
+    // [key, label, value_type, value, unit, description]. insertOrIgnore NO
+    // pisa un value ya editado por RRHH (sólo inserta si la key no existe).
+    const PARAMS = [
+        ['iess_personal_pct',  'Aporte personal IESS (%)',  'percentage', 9.45,  '%',   'Aporte personal del trabajador al IESS (relación de dependencia).'],
+        ['iess_patronal_pct',  'Aporte patronal IESS (%)',  'percentage', 11.15, '%',   'Aporte patronal del empleador al IESS.'],
+        ['sbu',                'Salario Básico Unificado',  'money',      470,   'USD', 'SBU vigente en Ecuador; base del décimo cuarto.'],
+        ['fondos_reserva_pct', 'Fondos de reserva (%)',     'percentage', 8.33,  '%',   'Porcentaje mensual de fondos de reserva (tras 1 año de antigüedad).']
+    ];
+    for (const [key, label, value_type, value, unit, description] of PARAMS) {
+        await db.execute(
+            insertOrIgnore('payroll_parameters', ['key', 'label', 'value_type', 'value', 'unit', 'description'], 'key'),
+            [key, label, value_type, value, unit, description]
+        );
+    }
+    console.log(`💵 Nómina: ${PARAMS.length} parámetros legales sembrados (idempotente por key)`);
+}
+
+
 // Helper: INSERT que ignora si la fila ya existe (UNIQUE conflict).
 // SQLite: INSERT OR IGNORE.  PostgreSQL: INSERT ... ON CONFLICT DO NOTHING.
 function insertOrIgnore(table, columns, conflictTarget) {
@@ -447,7 +637,12 @@ async function seedRbac() {
         ['hr.timeoff.waive_discount', 'hr',  'timeoff.waive_discount', 'Justificar una solicitud sin descuento de saldo (override exclusivo TTHH)'],
         // PR-3d: memos / comunicados
         ['hr.memos.read',      'hr',         'memos.read',       'Leer los propios memos / comunicados'],
-        ['hr.memos.write',     'hr',         'memos.write',      'Emitir memos a empleados (RRHH/Gerencia)']
+        ['hr.memos.write',     'hr',         'memos.write',      'Emitir memos a empleados (RRHH/Gerencia)'],
+        // Nómina / Roles de pago (v1.2)
+        ['hr.payroll.read',         'hr', 'payroll.read',         'Ver parámetros, corridas y el propio rol (empleado: SÓLO su renglón, SIN totales)'],
+        ['hr.payroll.read.all',     'hr', 'payroll.read.all',     'Ver total_* agregados y TODOS los renglones (gate de PII de nómina; desacoplado de hr.read.all)'],
+        ['hr.payroll.params.write', 'hr', 'payroll.params.write', 'Editar parámetros de nómina (auditado)'],
+        ['hr.payroll.run',          'hr', 'payroll.run',          'Generar y finalizar corridas de rol de pago']
     ];
     for (const [code, resource_type, action, description] of PERMS) {
         await db.execute(
@@ -546,6 +741,13 @@ async function seedRbac() {
         'hr.timeoff.request',
         'hr.memos.read'
     ]);
+
+    // Nómina (v1.2). Gate de total_* = hr.payroll.read.all (NO hr.read.all):
+    // jefe_contabilidad NO tiene hr.read.all pero debe ver los totales del rol que opera.
+    const payrollFullPerms = ['hr.payroll.read', 'hr.payroll.read.all', 'hr.payroll.params.write', 'hr.payroll.run'];
+    await grantPermsToRole('rrhh', payrollFullPerms);
+    await grantPermsToRole('jefe_contabilidad', payrollFullPerms);
+    await grantPermsToRole('empleado', ['hr.payroll.read']);
 
     // -------- Asignar admin del sistema al user admin (id=1) --------
     const adminUser = await db.queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
@@ -909,6 +1111,7 @@ async function init() {
     // F1: agrega las columnas del workflow multinivel a time_off_requests en
     // instalaciones existentes (las tablas nuevas ya las creó loadSchema).
     await migrateTimeOffWorkflowF1();
+    await migratePayrollV1();          // Nómina v1.2: tablas + columnas + parámetros legales
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();

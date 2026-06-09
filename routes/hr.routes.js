@@ -15,6 +15,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 const { requirePermission } = require('../controllers/rbac.controller');
 const HrController = require('../controllers/hr.controller');
 const HrMemosController = require('../controllers/hr_memos.controller');
+const PayrollController = require('../controllers/payroll.controller');
 
 // F1: límite y tipos permitidos para los justificativos de time-off.
 const TIMEOFF_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB (x-max-bytes de la spec)
@@ -110,6 +111,27 @@ router.get('/memos/sent',   authMiddleware, requirePermission('hr.memos.read'), 
 router.get('/memos/:id',    authMiddleware, requirePermission('hr.memos.read'), HrMemosController.getMemo);
 router.post('/memos',       authMiddleware, requirePermission('hr.memos.write'), HrMemosController.createMemo);
 router.post('/memos/:id/ack', authMiddleware, requirePermission('hr.memos.read'), HrMemosController.acknowledgeMemo);
+
+// ============================================================
+// Nómina / Roles de pago (v1.2). Bajo /api/hr/payroll/*.
+// La PROYECCIÓN de total_* / todos los renglones la decide hr.payroll.read.all
+// DENTRO del controller (no es guard de ruta). Ver _nominaspec_out 13-notes §0.
+// ============================================================
+router.get('/payroll/params',
+    authMiddleware, requirePermission('hr.payroll.read'), PayrollController.listParams);
+router.put('/payroll/params/:key',
+    authMiddleware, requirePermission('hr.payroll.params.write'), PayrollController.updateParam);
+router.get('/payroll/runs',
+    authMiddleware, requirePermission('hr.payroll.read'), PayrollController.listRuns);
+router.post('/payroll/runs',
+    authMiddleware, requirePermission('hr.payroll.run'), PayrollController.generateRun);
+router.get('/payroll/runs/:id',
+    authMiddleware, requirePermission('hr.payroll.read'), PayrollController.getRun);
+router.post('/payroll/runs/:id/finalize',
+    authMiddleware, requirePermission('hr.payroll.run'), PayrollController.finalizeRun);
+// PDF del rol de un empleado (scope IDOR -> 404 dentro del controller).
+router.get('/payroll/runs/:id/employee/:employeeId/pdf',
+    authMiddleware, requirePermission('hr.payroll.read'), PayrollController.employeePdf);
 
 // F1: handler de errores de subida (adjuntos de time-off). Traduce los errores
 // de multer a los códigos HTTP de la spec: tamaño → 413, tipo no permitido → 415.

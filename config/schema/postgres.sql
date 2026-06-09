@@ -376,6 +376,8 @@ CREATE TABLE IF NOT EXISTS hr_employees (
     manager_id INTEGER,
     hire_date DATE,
     base_salary NUMERIC(12,2),
+    mensualiza_decimos  INTEGER NOT NULL DEFAULT 0,   -- Nómina v1.2: 1=mensualiza décimos 13/14
+    paga_fondos_mensual INTEGER NOT NULL DEFAULT 0,   -- Nómina v1.2: 1=paga fondos de reserva mensual (antigüedad > 1 año)
     status TEXT DEFAULT 'active' CHECK(status IN ('active','terminated','on_leave')),
     address TEXT,
     notes TEXT,
@@ -572,3 +574,98 @@ CREATE TABLE IF NOT EXISTS hr_memo_acknowledgments (
 CREATE INDEX IF NOT EXISTS idx_hr_memos_target ON hr_memos(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_hr_memos_issued ON hr_memos(issued_at);
 CREATE INDEX IF NOT EXISTS idx_hr_memo_acks_user ON hr_memo_acknowledgments(user_id);
+
+-- ============================================================
+-- Nómina / Roles de pago (v1.2) — 3 tablas (las 2 cols de hr_employees las agrega migratePayrollV1)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payroll_parameters (
+    id SERIAL PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,                 -- snake_case; patrón validado en app
+    label TEXT NOT NULL,
+    value_type TEXT NOT NULL CHECK(value_type IN ('percentage','money','number')),
+    value NUMERIC(12,4) NOT NULL,             -- 4 decimales: cubre % finos (8.33) y montos
+    unit TEXT,
+    description TEXT,
+    updated_by INTEGER,                       -- FK users(id) — auditoría
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES users (id)
+);
+
+
+-- -----------------------------------------------------------------------------
+-- (B.2) payroll_runs — cabecera de corrida mensual (snapshot inmutable).
+-- UNIQUE(period_month, period_year): una corrida por mes (re-POST → 409).
+CREATE TABLE IF NOT EXISTS payroll_runs (
+    id SERIAL PRIMARY KEY,
+    period_month INTEGER NOT NULL,
+    period_year INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),
+    sbu_snapshot NUMERIC(12,2) NOT NULL,
+    total_ingresos NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_descuentos NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_neto NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_costo_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+    notes TEXT,
+    generated_by INTEGER NOT NULL,            -- FK users(id) — auditoría
+    finalized_by INTEGER,                     -- nullable
+    finalized_at TIMESTAMP,                   -- nullable
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (period_month, period_year),
+    FOREIGN KEY (generated_by) REFERENCES users (id),
+    FOREIGN KEY (finalized_by) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+
+
+-- -----------------------------------------------------------------------------
+-- (B.3) payroll_details — renglón por empleado (SNAPSHOT inmutable).
+-- UNIQUE(run_id, employee_id): un renglón por empleado por corrida.
+-- Montos por-renglón NUMERIC(12,2), alineados a hr_employees.base_salary.
+CREATE TABLE IF NOT EXISTS payroll_details (
+    id SERIAL PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+
+    -- Ingresos
+    sueldo_base NUMERIC(12,2) NOT NULL DEFAULT 0,
+    fondos_reserva NUMERIC(12,2) NOT NULL DEFAULT 0,
+    decimo_tercero NUMERIC(12,2) NOT NULL DEFAULT 0,
+    decimo_cuarto NUMERIC(12,2) NOT NULL DEFAULT 0,
+    horas_extra NUMERIC(12,2) NOT NULL DEFAULT 0,
+    otros_ingresos NUMERIC(12,2) NOT NULL DEFAULT 0,
+    total_ingresos NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+    -- Descuentos
+    base_aportable NUMERIC(12,2) NOT NULL DEFAULT 0,
+    aporte_personal NUMERIC(12,2) NOT NULL DEFAULT 0,
+    otros_descuentos NUMERIC(12,2) NOT NULL DEFAULT 0,
+    total_descuentos NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+    -- Resultado
+    neto_a_pagar NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+    -- Costo empresa (informativo)
+    aporte_patronal NUMERIC(12,2) NOT NULL DEFAULT 0,
+    provisiones NUMERIC(12,2) NOT NULL DEFAULT 0,
+    costo_empresa NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+    -- Snapshot de parámetros (INMUTABILIDAD)
+    iess_personal_pct_snapshot NUMERIC(8,4) NOT NULL,
+    iess_patronal_pct_snapshot NUMERIC(8,4) NOT NULL,
+    fondos_reserva_pct_snapshot NUMERIC(8,4) NOT NULL,
+    sbu_snapshot NUMERIC(12,2) NOT NULL,
+    mensualiza_decimos_snapshot INTEGER NOT NULL DEFAULT 0,
+    paga_fondos_mensual_snapshot INTEGER NOT NULL DEFAULT 0,
+
+    warnings_json TEXT,                         -- TEXT/TEXT a propósito (no JSONB; ver 13-notes.md §1.3)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE (run_id, employee_id),
+    FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id);
+CREATE INDEX IF NOT EXISTS idx_payroll_details_emp ON payroll_details(employee_id);
