@@ -244,24 +244,53 @@ const hrAdmin = (function () {
         try {
             const r = await api('GET', `/api/hr/employees/${id}`);
             const e = r.data.employee;
+            // ¿Puede ver/editar datos de nómina (sueldo + flags)? El backend
+            // revalida con hr.salary.write; acá gateamos la UI para no mostrar
+            // campos que este usuario no puede tocar. Admin tiene todo.
+            const puedeNomina = !!(window.__userIsAdmin ||
+                (window.__userPerms && window.__userPerms.has('hr.salary.write')));
+            const fields = [
+                { name: 'full_name', label: 'Nombre completo', type: 'text', required: true, default: e.full_name },
+                { name: 'status', label: 'Estado', type: 'select', required: true, default: e.status,
+                  options: [
+                    { value: 'active', label: 'Activo' },
+                    { value: 'on_leave', label: 'En licencia' },
+                    { value: 'terminated', label: 'Dado de baja' }
+                  ] }
+            ];
+            if (puedeNomina) {
+                // Datos de nómina por empleado (alimentan el cálculo del rol).
+                fields.push(
+                    { name: 'base_salary', label: 'Sueldo base (USD / mes)', type: 'number',
+                      placeholder: 'Ej: 470', default: (e.base_salary != null ? e.base_salary : '') },
+                    { name: 'paga_fondos_mensual', label: 'Paga fondos de reserva mensual (8.33%, tras 1 año)', type: 'select',
+                      default: String(Number(e.paga_fondos_mensual) || 0),
+                      options: [ { value: '0', label: 'No (acumula)' }, { value: '1', label: 'Sí (mensual)' } ] },
+                    { name: 'mensualiza_decimos', label: 'Mensualiza décimos 13/14 (entran al rol mensual)', type: 'select',
+                      default: String(Number(e.mensualiza_decimos) || 0),
+                      options: [ { value: '0', label: 'No (acumula)' }, { value: '1', label: 'Sí (mensual)' } ] }
+                );
+            }
             const data = await formDialog({
                 title: `Editar empleado · ${e.full_name}`,
-                fields: [
-                    { name: 'full_name', label: 'Nombre completo', type: 'text', required: true, default: e.full_name },
-                    { name: 'status', label: 'Estado', type: 'select', required: true, default: e.status,
-                      options: [
-                        { value: 'active', label: 'Activo' },
-                        { value: 'on_leave', label: 'En licencia' },
-                        { value: 'terminated', label: 'Dado de baja' }
-                      ] }
-                ],
+                description: puedeNomina
+                    ? 'El sueldo y la configuración de nómina sólo los ve y edita quien tiene permiso de salarios.'
+                    : '',
+                fields,
                 confirmText: 'Guardar cambios'
             });
             if (!data) return;
-            await api('PUT', `/api/hr/employees/${id}`, {
+            const payload = {
                 full_name: data.full_name.trim(),
                 status: data.status
-            });
+            };
+            if (puedeNomina) {
+                // El backend coacciona: '' → sin sueldo; '0'/'1' → 0/1.
+                payload.base_salary = data.base_salary;
+                payload.mensualiza_decimos = data.mensualiza_decimos;
+                payload.paga_fondos_mensual = data.paga_fondos_mensual;
+            }
+            await api('PUT', `/api/hr/employees/${id}`, payload);
             Notification.success('Empleado actualizado');
             invalidateEmployeesCache();
             loadEmployees();

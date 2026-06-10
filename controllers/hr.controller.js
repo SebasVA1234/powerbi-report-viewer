@@ -297,14 +297,22 @@ class HrController {
             // propio empleado y NO tiene hr.read.all
             const ctx = await getUserContext(req.user.id, req);
             const isSelf = employee.user_id === req.user.id;
-            if (!isSelf && !ctx.isAdmin && !ctx.permissions.has('hr.read.all')) {
-                delete employee.doc_id;
-                delete employee.email_personal;
-                delete employee.address;
+            const canSeePayroll = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+            if (!canSeePayroll) {
+                // Datos de nómina (sueldo + su configuración: mensualiza décimos /
+                // paga fondos) sólo los ve admin o hr.read.all — simetría con la
+                // escritura, que exige hr.salary.write. Aplica también al propio
+                // empleado por ahora (hasta habilitar que vea su rol).
                 delete employee.base_salary;
-            } else if (!ctx.isAdmin && !ctx.permissions.has('hr.read.all') && isSelf) {
-                // Self ve sus datos pero no su salario hasta que la nómina se habilite.
-                delete employee.base_salary;
+                delete employee.mensualiza_decimos;
+                delete employee.paga_fondos_mensual;
+                // Otros datos personales: ocultos a TERCEROS; el propio empleado sí
+                // ve su contacto (documento/email/dirección).
+                if (!isSelf) {
+                    delete employee.doc_id;
+                    delete employee.email_personal;
+                    delete employee.address;
+                }
             }
             res.json({ success: true, data: { employee } });
         } catch (err) {
@@ -855,14 +863,58 @@ class HrController {
             // tocar sueldos. El salario es PII crítica → principio de menor privilegio.
             const ctx = await getUserContext(req.user.id, req);
             const canEditSalary = ctx.isAdmin || ctx.permissions.has('hr.salary.write');
-            if (req.body.base_salary !== undefined && !canEditSalary) {
-                return res.status(403).json({ success: false, message: 'No autorizado para modificar el salario base' });
+            // base_salary y los flags de nómina (mensualiza_decimos / paga_fondos_mensual)
+            // son payroll-sensibles: exigen el permiso dedicado hr.salary.write
+            // (separación de funciones). Quien sólo tiene hr.write puede corregir
+            // teléfono/dirección pero NO tocar la configuración de nómina.
+            const payrollFields = ['base_salary', 'mensualiza_decimos', 'paga_fondos_mensual'];
+            for (const f of payrollFields) {
+                if (req.body[f] !== undefined && !canEditSalary) {
+                    return res.status(403).json({ success: false, message: 'No autorizado para modificar datos de nómina del empleado (sueldo/configuración)' });
+                }
             }
             const allowed = ['full_name', 'doc_id', 'email_personal', 'phone',
                              'position_id', 'department_id', 'manager_id',
                              'hire_date', 'status', 'address', 'notes', 'user_id'];
-            // base_salary sólo entra al allowlist si el caller tiene el permiso dedicado.
-            if (canEditSalary) allowed.push('base_salary');
+            // Campos de nómina: sólo con el permiso dedicado, y con coerción al tipo
+            // de columna para no romper Postgres ('' en NUMERIC, '1' string en INTEGER).
+            if (canEditSalary) {
+                if (req.body.base_salary !== undefined) {
+                    const bs = req.body.base_salary;
+                    // Sólo número o string (no arrays/objetos de un cliente directo:
+                    // Number([]) === 0 → un sueldo se setearía en 0 silenciosamente).
+                    if (typeof bs !== 'number' && typeof bs !== 'string') {
+                        return res.status(400).json({ success: false, message: 'Salario base inválido' });
+                    }
+                    const raw = String(bs).trim(); // trim: "  " no debe volverse 0
+                    if (raw === '') {
+                        req.body.base_salary = null; // permite "limpiar" el sueldo
+                    } else {
+                        const n = Number(raw);
+                        // 9999999999.99 = máx de NUMERIC(12,2) en postgres.sql (cambiar JUNTOS).
+                        if (!Number.isFinite(n) || n < 0 || n > 9999999999.99) {
+                            return res.status(400).json({ success: false, message: 'Salario base inválido (número entre 0 y 9,999,999,999.99)' });
+                        }
+                        // Normalizar a 2 decimales: SQLite (REAL) guardaría 470.555 y
+                        // Postgres (NUMERIC(12,2)) lo redondearía a 470.56 → paridad rota.
+                        // Half-up robusto (corrige sesgo IEEE754), MISMA fórmula que round2()
+                        // en payroll.controller.js, para que sueldo y rol redondeen idéntico.
+                        req.body.base_salary = Math.round(n * 100 * (1 + Number.EPSILON)) / 100;
+                    }
+                    allowed.push('base_salary');
+                }
+                for (const f of ['mensualiza_decimos', 'paga_fondos_mensual']) {
+                    if (req.body[f] !== undefined) {
+                        // No tragar input malformado (arrays/objetos) como 0 silencioso.
+                        if (typeof req.body[f] === 'object') {
+                            return res.status(400).json({ success: false, message: `Valor inválido para ${f}` });
+                        }
+                        // INTEGER 0/1 (igual que el resto de banderas booleanas del repo).
+                        req.body[f] = (req.body[f] === 1 || req.body[f] === '1' || req.body[f] === true) ? 1 : 0;
+                        allowed.push(f);
+                    }
+                }
+            }
             const updates = [];
             const values = [];
             for (const k of allowed) {
