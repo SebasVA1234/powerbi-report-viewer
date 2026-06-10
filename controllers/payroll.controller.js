@@ -444,10 +444,17 @@ class PayrollController {
                 return res.status(400).json({ success: false, message: 'key inválida (snake_case, a-z 0-9 _)' });
             }
 
-            // value debe venir y ser numérico finito y no negativo.
-            const numValue = Number(value);
-            if (value === undefined || value === null || !Number.isFinite(numValue)) {
+            // value debe venir y ser numérico finito y no negativo. Rechazamos
+            // arrays/objetos y strings vacíos ANTES de Number(): Number([]) y
+            // Number('  ') dan 0 → setearían el parámetro (ej. SBU) en 0 sin aviso.
+            if (value === undefined || value === null ||
+                (typeof value !== 'number' && typeof value !== 'string') ||
+                (typeof value === 'string' && value.trim() === '')) {
                 return res.status(400).json({ success: false, message: 'value es obligatorio y debe ser numérico' });
+            }
+            const numValue = Number(value);
+            if (!Number.isFinite(numValue)) {
+                return res.status(400).json({ success: false, message: 'value debe ser numérico' });
             }
             if (numValue < 0) {
                 return res.status(400).json({ success: false, message: 'value no puede ser negativo' });

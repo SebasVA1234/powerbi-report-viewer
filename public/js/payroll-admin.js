@@ -450,7 +450,7 @@ const payrollAdmin = (function () {
                         <tr class="payroll-group-row">
                             <th></th>
                             <th colspan="6" class="payroll-group payroll-group-ingresos">INGRESOS</th>
-                            <th colspan="2" class="payroll-group payroll-group-egresos">EGRESOS</th>
+                            <th colspan="3" class="payroll-group payroll-group-egresos">EGRESOS</th>
                             <th class="payroll-group payroll-group-neto">LÍQUIDO</th>
                             <th class="payroll-col-costo payroll-group payroll-group-costo" style="display:none;">EMPRESA</th>
                             <th></th>

@@ -297,7 +297,13 @@ class HrController {
             // propio empleado y NO tiene hr.read.all
             const ctx = await getUserContext(req.user.id, req);
             const isSelf = employee.user_id === req.user.id;
-            const canSeePayroll = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+            // Quien puede VER la nómina: admin, hr.read.all, O quien puede EDITARLA
+            // (hr.salary.write). Incluir el permiso de escritura es clave: si no,
+            // un editor de sueldos abriría el form sin los valores actuales y al
+            // guardar los borraría sin querer.
+            const canSeePayroll = ctx.isAdmin
+                || ctx.permissions.has('hr.read.all')
+                || ctx.permissions.has('hr.salary.write');
             if (!canSeePayroll) {
                 // Datos de nómina (sueldo + su configuración: mensualiza décimos /
                 // paga fondos) sólo los ve admin o hr.read.all — simetría con la
@@ -838,6 +844,20 @@ class HrController {
             if (!employee) {
                 return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
             }
+            // Inmutabilidad de nómina: payroll_details.employee_id es ON DELETE
+            // CASCADE, así que borrar un empleado destruiría sus renglones en roles
+            // ya FINALIZADOS (recibos con valor legal) y descuadraría los totales
+            // del run. Si tiene historial de nómina, bloqueamos el hard-delete:
+            // para una baja real, RRHH usa status='terminated'.
+            const tieneNomina = await db.queryOne(
+                'SELECT 1 AS x FROM payroll_details WHERE employee_id = ? LIMIT 1', [id]
+            );
+            if (tieneNomina) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'El empleado tiene historial de roles de pago y no puede eliminarse (rompería recibos sellados). Cambiá su estado a "Dado de baja".'
+                });
+            }
             await db.execute('DELETE FROM hr_employees WHERE id = ?', [id]);
             res.json({
                 success: true,
@@ -876,6 +896,32 @@ class HrController {
             const allowed = ['full_name', 'doc_id', 'email_personal', 'phone',
                              'position_id', 'department_id', 'manager_id',
                              'hire_date', 'status', 'address', 'notes', 'user_id'];
+            // Validación de campos con CHECK/FK estrictos o que alimentan nómina:
+            // un valor basura daría 500 en Postgres (DATE/CHECK/UNIQUE) o, peor,
+            // cálculo de fondos silenciosamente mal en SQLite (afinidad débil de DATE).
+            if (req.body.hire_date !== undefined && req.body.hire_date !== null && req.body.hire_date !== '') {
+                const hd = String(req.body.hire_date);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(hd) || isNaN(new Date(hd + 'T00:00:00').getTime())) {
+                    return res.status(400).json({ success: false, message: 'Fecha de ingreso inválida (formato YYYY-MM-DD)' });
+                }
+            }
+            if (req.body.status !== undefined &&
+                !['active', 'on_leave', 'terminated'].includes(req.body.status)) {
+                return res.status(400).json({ success: false, message: 'Estado inválido (active / on_leave / terminated)' });
+            }
+            if (req.body.user_id !== undefined && req.body.user_id !== null) {
+                const u = await db.queryOne('SELECT id FROM users WHERE id = ?', [req.body.user_id]);
+                if (!u) {
+                    return res.status(400).json({ success: false, message: 'user_id inexistente' });
+                }
+                const dup = await db.queryOne(
+                    'SELECT id FROM hr_employees WHERE user_id = ? AND id <> ?',
+                    [req.body.user_id, id]
+                );
+                if (dup) {
+                    return res.status(409).json({ success: false, message: 'Ese usuario ya está vinculado a otro empleado' });
+                }
+            }
             // Campos de nómina: sólo con el permiso dedicado, y con coerción al tipo
             // de columna para no romper Postgres ('' en NUMERIC, '1' string en INTEGER).
             if (canEditSalary) {

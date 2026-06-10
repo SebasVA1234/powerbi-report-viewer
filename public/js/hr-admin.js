@@ -167,6 +167,12 @@ const hrAdmin = (function () {
                 tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin empleados visibles.</td></tr>';
                 return;
             }
+            // ¿Puede editar nómina? Habilita el botón "Nómina" por fila. El form de
+            // sueldo/flags vive en editEmployee, que para empleados CON usuario no se
+            // alcanza por "Editar" (va a openUserPermissions) → sin este botón el caso
+            // normal no tendría dónde cargar el sueldo.
+            const puedeSalario = !!(window.__userIsAdmin ||
+                (window.__userPerms && window.__userPerms.has('hr.salary.write')));
             tbody.innerHTML = emps.map(e => {
                 // PR-3a: un empleado se considera "perfil incompleto" cuando
                 // falta cargo, documento o fecha de ingreso. Eso pasa cuando
@@ -195,6 +201,7 @@ const hrAdmin = (function () {
                     <td>${escapeHtml(fmtDate(e.hire_date) || '-')}</td>
                     <td>
                         <button class="btn-edit" onclick="${editAction}">${incomplete ? 'Completar' : 'Editar'}</button>
+                        ${puedeSalario ? `<button class="btn-edit" onclick="hrAdmin.editEmployee(${e.id})" title="Sueldo y configuración de nómina">Nómina</button>` : ''}
                         <button class="btn-edit" onclick="hrAdmin.viewBalance(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Saldo</button>
                         <button class="btn-delete" onclick="hrAdmin.deleteEmployee(${e.id}, '${escapeHtml(e.full_name).replace(/'/g, "\\'")}')">Eliminar</button>
                     </td>
@@ -249,6 +256,13 @@ const hrAdmin = (function () {
             // campos que este usuario no puede tocar. Admin tiene todo.
             const puedeNomina = !!(window.__userIsAdmin ||
                 (window.__userPerms && window.__userPerms.has('hr.salary.write')));
+            // Mostrar/enviar los campos de nómina SÓLO si además el GET los trajo.
+            // hasOwnProperty distingue "sueldo null" (clave presente) de "campo
+            // ocultado por el server" (clave ausente): así nunca re-mandamos a
+            // ciegas lo que no recibimos → no se borra el sueldo/flags si el RBAC
+            // diera escritura sin lectura.
+            const nominaVisible = puedeNomina &&
+                Object.prototype.hasOwnProperty.call(e, 'base_salary');
             const fields = [
                 { name: 'full_name', label: 'Nombre completo', type: 'text', required: true, default: e.full_name },
                 { name: 'status', label: 'Estado', type: 'select', required: true, default: e.status,
@@ -258,7 +272,7 @@ const hrAdmin = (function () {
                     { value: 'terminated', label: 'Dado de baja' }
                   ] }
             ];
-            if (puedeNomina) {
+            if (nominaVisible) {
                 // Datos de nómina por empleado (alimentan el cálculo del rol).
                 fields.push(
                     { name: 'base_salary', label: 'Sueldo base (USD / mes)', type: 'number',
@@ -273,7 +287,7 @@ const hrAdmin = (function () {
             }
             const data = await formDialog({
                 title: `Editar empleado · ${e.full_name}`,
-                description: puedeNomina
+                description: nominaVisible
                     ? 'El sueldo y la configuración de nómina sólo los ve y edita quien tiene permiso de salarios.'
                     : '',
                 fields,
@@ -284,7 +298,7 @@ const hrAdmin = (function () {
                 full_name: data.full_name.trim(),
                 status: data.status
             };
-            if (puedeNomina) {
+            if (nominaVisible) {
                 // El backend coacciona: '' → sin sueldo; '0'/'1' → 0/1.
                 payload.base_salary = data.base_salary;
                 payload.mensualiza_decimos = data.mensualiza_decimos;
@@ -302,7 +316,7 @@ const hrAdmin = (function () {
     async function deleteEmployee(id, name) {
         const ok = await confirmDialog({
             title: `¿Eliminar a ${name}?`,
-            message: 'Se borran sus asistencias a feriados y solicitudes de tiempo libre. Si solo querés darle de baja, editá el estado a "Dado de baja". No se puede deshacer.',
+            message: 'Se borran sus asistencias a feriados y solicitudes de tiempo libre. Si tiene historial de roles de pago NO se podrá eliminar (eso protege los recibos sellados). Para una baja normal, mejor cambiá el estado a "Dado de baja". No se puede deshacer.',
             confirmText: 'Eliminar empleado',
             typeToConfirm: 'ELIMINAR'
         });

@@ -48,24 +48,43 @@
             font-weight: 600; text-align: left;
             position: sticky; top: 0;
         }
+        /* Colores semánticos de la planilla, POR TEMA. En dark los tonos
+           pastel (verde claro / rojo claro) leen bien sobre fondo oscuro;
+           en light esos mismos tonos desaparecen sobre blanco → usamos los
+           equivalentes oscuros (emerald-700 / red-700). Variables scopeadas
+           para no contaminar el design system global. */
+        :root {
+            --pay-ingresos: var(--accent-light);          /* #34d399 sobre oscuro */
+            --pay-egresos:  #fca5a5;                      /* rojo pastel sobre oscuro */
+            --pay-neto-bg:  rgba(52, 211, 153, 0.10);
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --pay-ingresos: #047857;                  /* emerald-700 sobre blanco */
+                --pay-egresos:  #b91c1c;                  /* red-700 sobre blanco */
+                --pay-neto-bg:  rgba(16, 185, 129, 0.12);
+            }
+        }
+
         /* Cabeceras de grupo (INGRESOS / EGRESOS / LÍQUIDO / EMPRESA). */
         .payroll-group {
             text-align: center !important; text-transform: uppercase;
             letter-spacing: 0.05em; font-size: 0.7rem; font-weight: 800;
         }
-        .payroll-group-ingresos { color: var(--accent-light); }
-        .payroll-group-egresos  { color: #fca5a5; }
+        .payroll-group-ingresos { color: var(--pay-ingresos); }
+        .payroll-group-egresos  { color: var(--pay-egresos); }
         .payroll-group-neto     { color: var(--text-1); }
         .payroll-group-costo    { color: var(--text-3); }
 
         .payroll-num { text-align: right; font-variant-numeric: tabular-nums; }
         .payroll-emp { font-weight: 600; color: var(--text-1); }
-        .payroll-subtotal { background: rgba(255,255,255,0.03); font-weight: 600; }
+        /* bg-hover / bg-input ya cambian solos con el tema (design system). */
+        .payroll-subtotal { background: var(--bg-hover); font-weight: 600; }
         .payroll-neto {
-            background: rgba(52, 211, 153, 0.10);
-            color: var(--accent-light); font-weight: 700;
+            background: var(--pay-neto-bg);
+            color: var(--pay-ingresos); font-weight: 700;
         }
-        .payroll-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+        .payroll-table tbody tr:hover td { background: var(--bg-hover); }
 
         /* Fila de TOTALES al pie (sólo con read.all). */
         .payroll-totals-row td {
