@@ -335,6 +335,7 @@ function shapeRun(row, includeTotals) {
         generated_by: row.generated_by,
         generated_by_username: row.generated_by_username ?? null,
         finalized_by: row.finalized_by ?? null,
+        finalized_by_username: row.finalized_by_username ?? null,
         finalized_at: row.finalized_at ?? null,
         created_at: row.created_at
     };
@@ -799,9 +800,11 @@ class PayrollController {
             const finalized = await db.queryOne(`
                 SELECT r.*,
                        u.username AS generated_by_username,
+                       uf.username AS finalized_by_username,
                        (SELECT COUNT(*) FROM payroll_details d WHERE d.run_id = r.id) AS employee_count
                 FROM payroll_runs r
                 LEFT JOIN users u ON u.id = r.generated_by
+                LEFT JOIN users uf ON uf.id = r.finalized_by
                 WHERE r.id = ?
             `, [runId]);
 
@@ -887,9 +890,11 @@ class PayrollController {
         const runRow = await db.queryOne(`
             SELECT r.*,
                    u.username AS generated_by_username,
+                   uf.username AS finalized_by_username,
                    (SELECT COUNT(*) FROM payroll_details d WHERE d.run_id = r.id) AS employee_count
             FROM payroll_runs r
             LEFT JOIN users u ON u.id = r.generated_by
+            LEFT JOIN users uf ON uf.id = r.finalized_by
             WHERE r.id = ?
         `, [runId]);
         if (!runRow) {

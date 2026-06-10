@@ -17,6 +17,83 @@
     <link rel="stylesheet" href="css/cotizador.css">
     <!-- PR-2a Fase 2: Antigravity design system, debe cargarse ÚLTIMO. -->
     <link rel="stylesheet" href="css/design-system.css">
+    <style>
+        /* ---- Nómina: planilla estilo Excel (scopeado a la pestaña/modal) ---- */
+        .payroll-detail-header {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 1rem; flex-wrap: wrap;
+            padding-bottom: 0.75rem; margin-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .payroll-table-toolbar { margin-bottom: 0.5rem; min-height: 1.4rem; }
+        .payroll-costo-toggle {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            font-size: 0.82rem; color: var(--text-2); cursor: pointer;
+        }
+        .payroll-costo-toggle input { width: auto; }
+
+        /* Scroll horizontal si la tabla no entra (mobile-friendly a 1280px). */
+        .payroll-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        .payroll-table {
+            width: 100%; border-collapse: collapse; font-size: 0.82rem;
+            min-width: 880px; /* dispara el scroll en pantallas chicas sin romper */
+        }
+        .payroll-table th, .payroll-table td {
+            padding: 0.4rem 0.6rem; border: 1px solid var(--border);
+            white-space: nowrap;
+        }
+        .payroll-table thead th {
+            background: var(--bg-input); color: var(--text-2);
+            font-weight: 600; text-align: left;
+            position: sticky; top: 0;
+        }
+        /* Cabeceras de grupo (INGRESOS / EGRESOS / LÍQUIDO / EMPRESA). */
+        .payroll-group {
+            text-align: center !important; text-transform: uppercase;
+            letter-spacing: 0.05em; font-size: 0.7rem; font-weight: 800;
+        }
+        .payroll-group-ingresos { color: var(--accent-light); }
+        .payroll-group-egresos  { color: #fca5a5; }
+        .payroll-group-neto     { color: var(--text-1); }
+        .payroll-group-costo    { color: var(--text-3); }
+
+        .payroll-num { text-align: right; font-variant-numeric: tabular-nums; }
+        .payroll-emp { font-weight: 600; color: var(--text-1); }
+        .payroll-subtotal { background: rgba(255,255,255,0.03); font-weight: 600; }
+        .payroll-neto {
+            background: rgba(52, 211, 153, 0.10);
+            color: var(--accent-light); font-weight: 700;
+        }
+        .payroll-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+
+        /* Fila de TOTALES al pie (sólo con read.all). */
+        .payroll-totals-row td {
+            border-top: 2px solid var(--border-strong);
+            background: var(--bg-input);
+        }
+
+        /* Ícono de aviso por renglón. */
+        .payroll-warn { cursor: help; margin-left: 0.25rem; }
+
+        /* ---- Tarjetas de parámetros ---- */
+        .payroll-param-card {
+            border: 1px solid var(--border); border-radius: var(--radius-md);
+            padding: 0.85rem 1rem; margin-bottom: 0.75rem; background: var(--bg-input);
+        }
+        .payroll-param-main {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 1rem; flex-wrap: wrap;
+        }
+        .payroll-param-value {
+            font-size: 1.1rem; font-weight: 800; color: var(--text-1);
+            white-space: nowrap;
+        }
+        .payroll-param-foot {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 0.75rem; margin-top: 0.6rem; flex-wrap: wrap;
+        }
+    </style>
 </head>
 <body>
     <!-- Orbs decorativos del design system antigravity -->
@@ -386,6 +463,14 @@
                                     </svg>
                                     Memos
                                 </button>
+                                <button class="tab-btn" data-hr-tab="payroll" data-permission="hr.payroll.read" style="display: none;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                        <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+                                        <line x1="2" y1="10" x2="22" y2="10"></line>
+                                        <line x1="6" y1="15" x2="10" y2="15"></line>
+                                    </svg>
+                                    Nómina
+                                </button>
                             </div>
 
                             <!-- Tab: Mi Perfil RRHH -->
@@ -526,6 +611,60 @@
                                         </thead>
                                         <tbody id="hr-time-off-tbody">
                                             <tr><td colspan="7" class="loading">Cargando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <!-- Tab: Nómina / Roles de Pago (v1.2) -->
+                            <div id="hr-payroll-tab" class="tab-content">
+                                <div class="tab-header">
+                                    <h3>Nómina · Roles de Pago</h3>
+                                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                                        <!-- "Parámetros" visible para todos (incluye vista de lectura). -->
+                                        <button class="btn btn-outline" onclick="payrollAdmin.openParams()">Parámetros</button>
+                                        <!-- "Generar" se oculta/mostra desde JS según hr.payroll.run. -->
+                                        <button class="btn btn-primary" id="payroll-btn-generar" style="display:none;" onclick="payrollAdmin.openGenerateRun()">+ Generar rol del mes</button>
+                                    </div>
+                                </div>
+
+                                <p style="color:var(--text-3); font-size:0.85rem; margin-bottom:0.85rem;">
+                                    Generación de un clic, recálculo correcto y rol <strong>inmutable</strong> una vez finalizado.
+                                    Recibo en PDF por empleado y avisos automáticos: pensado para reemplazar el Excel.
+                                </p>
+
+                                <!-- Filtros: Año / Mes / Estado -->
+                                <div class="rbac-filter-row" style="flex-wrap:wrap; gap:0.75rem;">
+                                    <label>Año:</label>
+                                    <select id="payroll-filter-year" onchange="payrollAdmin.loadRuns()">
+                                        <option value="">Todos</option>
+                                    </select>
+                                    <label>Mes:</label>
+                                    <select id="payroll-filter-month" onchange="payrollAdmin.loadRuns()">
+                                        <option value="">Todos</option>
+                                    </select>
+                                    <label>Estado:</label>
+                                    <select id="payroll-filter-status" onchange="payrollAdmin.loadRuns()">
+                                        <option value="" selected>Todos</option>
+                                        <option value="draft">Borrador</option>
+                                        <option value="finalized">Finalizado</option>
+                                    </select>
+                                </div>
+
+                                <!-- Lista de corridas -->
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Período</th>
+                                                <th>Estado</th>
+                                                <th># Empleados</th>
+                                                <th>Total Neto</th>
+                                                <th>Generado por</th>
+                                                <th>Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="payroll-runs-tbody">
+                                            <tr><td colspan="6" class="loading">Cargando roles de pago...</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1887,6 +2026,41 @@
             </div>
         </div>
 
+        <!-- Modal: Parámetros de nómina (lista + edición auditada) -->
+        <div id="payroll-params-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Parámetros de nómina</h3>
+                    <button class="btn-close" onclick="closeModal('payroll-params-modal')">&times;</button>
+                </div>
+                <div class="modal-body" id="payroll-params-body">
+                    <p class="loading">Cargando parámetros...</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('payroll-params-modal')">Cerrar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Detalle del rol — planilla estilo Excel.
+             Ancho ampliado (inline, patrón de report-viewer): la tabla agrupada
+             INGRESOS/EGRESOS/LÍQUIDO necesita más que los 480px del modal base.
+             El render lo arma payrollAdmin.renderRunDetail(). -->
+        <div id="payroll-detail-modal" class="modal">
+            <div class="modal-content" style="max-width:1200px; width:96%;">
+                <div class="modal-header">
+                    <h3>Rol de pago</h3>
+                    <button class="btn-close" onclick="closeModal('payroll-detail-modal')">&times;</button>
+                </div>
+                <div class="modal-body" id="payroll-detail-body">
+                    <p class="loading">Cargando...</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('payroll-detail-modal')">Cerrar</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Visor de PDF (view-only) -->
         <div id="pdf-viewer-modal" class="pdf-viewer-modal">
             <div class="pdf-viewer-shell">
@@ -1941,6 +2115,7 @@
     <script src="js/user-permissions.js"></script>
     <script src="js/by-dept.js"></script>
     <script src="js/hr-admin.js"></script>
+    <script src="js/payroll-admin.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
