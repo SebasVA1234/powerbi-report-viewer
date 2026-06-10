@@ -552,15 +552,17 @@ class PayrollController {
             }
 
             // ---- Idempotencia: ¿ya existe corrida para ese período? → 409 ----
+            // Mensaje según estado: un BORRADOR puede eliminarse y regenerarse
+            // (DELETE /runs/:id); un rol FINALIZADO es inmutable para siempre.
             const existing = await db.queryOne(
-                'SELECT id FROM payroll_runs WHERE period_month = ? AND period_year = ?',
+                'SELECT id, status FROM payroll_runs WHERE period_month = ? AND period_year = ?',
                 [month, year]
             );
             if (existing) {
-                return res.status(409).json({
-                    success: false,
-                    message: `Ya existe una corrida para ${month}/${year}. Re-generar no está permitido (rol inmutable).`
-                });
+                const msg = existing.status === 'draft'
+                    ? `Ya existe un borrador para ${month}/${year}. Eliminá ese borrador para regenerar.`
+                    : `Ya existe un rol finalizado para ${month}/${year} (inmutable, no puede regenerarse).`;
+                return res.status(409).json({ success: false, message: msg });
             }
 
             // ---- Resolver empleados ----
@@ -816,6 +818,51 @@ class PayrollController {
         } catch (err) {
             console.error('finalizeRun:', err);
             return res.status(500).json({ success: false, message: 'Error al finalizar la corrida' });
+        }
+    }
+
+    // =========================================================================
+    // DELETE /api/hr/payroll/runs/:id — elimina un BORRADOR (y sólo un borrador).
+    // Acceso: hr.payroll.run (en la ruta). Caso de uso: se generó el rol con un
+    // sueldo/parámetro mal cargado → se corrige el dato, se elimina el borrador
+    // y se regenera el período. Un rol FINALIZADO es inmutable: 409, jamás se
+    // borra. Los renglones (payroll_details) caen por FK ON DELETE CASCADE
+    // (SQLite tiene foreign_keys=ON en el driver; Postgres cascadea nativo).
+    // =========================================================================
+    static async deleteRun(req, res) {
+        try {
+            const runId = Number(req.params.id);
+            if (!Number.isInteger(runId) || runId <= 0) {
+                return res.status(400).json({ success: false, message: 'ID de corrida inválido' });
+            }
+
+            const run = await db.queryOne(
+                'SELECT id, status, period_month, period_year FROM payroll_runs WHERE id = ?', [runId]
+            );
+            if (!run) {
+                return res.status(404).json({ success: false, message: 'Corrida no encontrada' });
+            }
+            if (run.status !== RUN_STATUS_DRAFT) {
+                return res.status(409).json({ success: false, message: 'Un rol finalizado es inmutable y no puede eliminarse' });
+            }
+
+            // DELETE condicionado a status='draft': si otra request lo finalizó
+            // hace un instante, changes=0 → 409 (no borramos un rol sellado).
+            const result = await db.execute(
+                'DELETE FROM payroll_runs WHERE id = ? AND status = ?',
+                [runId, RUN_STATUS_DRAFT]
+            );
+            if (!result.changes) {
+                return res.status(409).json({ success: false, message: 'La corrida ya fue finalizada y no puede eliminarse' });
+            }
+
+            return res.json({
+                success: true,
+                message: `Borrador ${run.period_month}/${run.period_year} eliminado; ya podés regenerar el período`
+            });
+        } catch (err) {
+            console.error('deleteRun:', err);
+            return res.status(500).json({ success: false, message: 'Error al eliminar el borrador' });
         }
     }
 

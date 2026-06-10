@@ -290,6 +290,29 @@ const payrollAdmin = (function () {
     }
 
     // ============================================================
+    // Acción: Eliminar BORRADOR — para corregir datos y regenerar el período.
+    // Un rol finalizado nunca se elimina (el backend devuelve 409).
+    // ============================================================
+    async function deleteDraft(runId) {
+        const ok = await confirmDialog({
+            title: '¿Eliminar este borrador?',
+            message: 'Se elimina el borrador completo (todos los renglones calculados). Útil si un sueldo o parámetro estaba mal cargado: corregilo y volvé a generar el período. Un rol FINALIZADO nunca puede eliminarse.',
+            confirmText: 'Eliminar borrador',
+            cancelText: 'Cancelar',
+            danger: true
+        });
+        if (!ok) return;
+        try {
+            const r = await api('DELETE', `/runs/${runId}`);
+            Notification.success(r.message || 'Borrador eliminado');
+            closeModal('payroll-detail-modal');
+            loadRuns(); // refrescar la lista (el período queda libre)
+        } catch (err) {
+            Notification.error('No se pudo eliminar: ' + err.message);
+        }
+    }
+
+    // ============================================================
     // Acción: Finalizar (sellar el rol) — confirma con modal del design system
     // ============================================================
     async function finalizeRun(runId) {
@@ -371,11 +394,13 @@ const payrollAdmin = (function () {
             ? `<p style="margin:0.35rem 0 0; color:var(--text-2);">Sellado por <strong>${escapeHtml(run.finalized_by_username || run.finalized_by || '—')}</strong> · ${escapeHtml(fmtDateTime(run.finalized_at))}</p>`
             : `<p style="margin:0.35rem 0 0; color:var(--text-3);">Borrador editable — al finalizarlo queda inmutable.</p>`;
 
-        // Botón de finalizar EN EL ENCABEZADO del detalle: sólo en borrador y con
-        // permiso. En finalizado mostramos un sello visual de "inmutable".
+        // Botones EN EL ENCABEZADO del detalle: en borrador (y con permiso),
+        // "Finalizar y sellar" + "Eliminar borrador" (permite corregir un dato
+        // y regenerar el período). En finalizado, sello visual de "inmutable".
         const puedeFinalizar = !finalizado && tienePermiso(PERM_RUN);
         const accionHeader = puedeFinalizar
-            ? `<button class="btn btn-primary" onclick="payrollAdmin.finalizeRun(${run.id})">Finalizar y sellar</button>`
+            ? `<button class="btn btn-outline" onclick="payrollAdmin.deleteDraft(${run.id})">Eliminar borrador</button>
+               <button class="btn btn-primary" onclick="payrollAdmin.finalizeRun(${run.id})">Finalizar y sellar</button>`
             : (finalizado ? '<span class="badge badge-success" title="Este rol está sellado y no puede modificarse">🔒 Inmutable</span>' : '');
 
         const header = `
@@ -702,6 +727,7 @@ const payrollAdmin = (function () {
         loadRuns,
         openGenerateRun,
         finalizeRun,
+        deleteDraft,
         openRunDetail,
         downloadPdf,
         toggleCostoEmpresa,

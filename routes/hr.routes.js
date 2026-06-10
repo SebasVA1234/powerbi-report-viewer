@@ -129,6 +129,9 @@ router.get('/payroll/runs/:id',
     authMiddleware, requirePermission('hr.payroll.read'), PayrollController.getRun);
 router.post('/payroll/runs/:id/finalize',
     authMiddleware, requirePermission('hr.payroll.run'), PayrollController.finalizeRun);
+// Eliminar un BORRADOR para poder regenerar el período (finalizado -> 409).
+router.delete('/payroll/runs/:id',
+    authMiddleware, requirePermission('hr.payroll.run'), PayrollController.deleteRun);
 // PDF del rol de un empleado (scope IDOR -> 404 dentro del controller).
 router.get('/payroll/runs/:id/employee/:employeeId/pdf',
     authMiddleware, requirePermission('hr.payroll.read'), PayrollController.employeePdf);
