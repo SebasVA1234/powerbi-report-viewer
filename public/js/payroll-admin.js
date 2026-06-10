@@ -147,6 +147,11 @@ const payrollAdmin = (function () {
         // el botón "Editar" de cada parámetro se gatea dentro del modal.
     }
 
+    // Guard anti-doble-submit: una acción mutadora (generar/finalizar/eliminar)
+    // a la vez. Evita el toast de error engañoso del 2do request (409/404) cuando
+    // el usuario hace doble-click en el botón.
+    let _accionEnVuelo = false;
+
     // Punto de entrada de la pestaña: monta los filtros y carga la lista.
     function activate() {
         applyPayrollGating();
@@ -247,6 +252,7 @@ const payrollAdmin = (function () {
     // Pantalla 5: Generar rol del mes
     // ============================================================
     async function openGenerateRun() {
+        if (_accionEnVuelo) return;
         const ahora = new Date();
         // Pre-seleccionamos el mes ANTERIOR (la nómina suele generarse a mes
         // vencido). getMonth() es 0-based: el mes anterior en base-1 es getMonth().
@@ -274,10 +280,19 @@ const payrollAdmin = (function () {
             return;
         }
 
+        _accionEnVuelo = true;
         try {
             const resp = await api('POST', '/runs', { period_month: month, period_year: year });
             Notification.success(`Rol de ${fmtPeriodo(month, year)} generado`);
-            // Refrescamos la lista y abrimos el detalle del rol recién creado.
+            // Alinear los filtros al período generado para que el rol recién creado
+            // SÍ aparezca en la lista (evita la "trampa de enero": generar diciembre
+            // con el filtro en el año nuevo dejaba el rol fuera de la vista).
+            const yearSel = document.getElementById('payroll-filter-year');
+            const monthSel = document.getElementById('payroll-filter-month');
+            if (yearSel && [...yearSel.options].some(o => o.value === String(year))) {
+                yearSel.value = String(year);
+            }
+            if (monthSel) monthSel.value = '';
             await loadRuns();
             const nuevoRun = resp.data && resp.data.run;
             if (nuevoRun && nuevoRun.id) {
@@ -286,6 +301,8 @@ const payrollAdmin = (function () {
         } catch (err) {
             // 409 = ya existe un rol para ese período (rol inmutable).
             Notification.error('No se pudo generar: ' + err.message);
+        } finally {
+            _accionEnVuelo = false;
         }
     }
 
@@ -294,6 +311,7 @@ const payrollAdmin = (function () {
     // Un rol finalizado nunca se elimina (el backend devuelve 409).
     // ============================================================
     async function deleteDraft(runId) {
+        if (_accionEnVuelo) return;
         const ok = await confirmDialog({
             title: '¿Eliminar este borrador?',
             message: 'Se elimina el borrador completo (todos los renglones calculados). Útil si un sueldo o parámetro estaba mal cargado: corregilo y volvé a generar el período. Un rol FINALIZADO nunca puede eliminarse.',
@@ -302,6 +320,7 @@ const payrollAdmin = (function () {
             danger: true
         });
         if (!ok) return;
+        _accionEnVuelo = true;
         try {
             const r = await api('DELETE', `/runs/${runId}`);
             Notification.success(r.message || 'Borrador eliminado');
@@ -309,6 +328,8 @@ const payrollAdmin = (function () {
             loadRuns(); // refrescar la lista (el período queda libre)
         } catch (err) {
             Notification.error('No se pudo eliminar: ' + err.message);
+        } finally {
+            _accionEnVuelo = false;
         }
     }
 
@@ -316,6 +337,7 @@ const payrollAdmin = (function () {
     // Acción: Finalizar (sellar el rol) — confirma con modal del design system
     // ============================================================
     async function finalizeRun(runId) {
+        if (_accionEnVuelo) return;
         const ok = await confirmDialog({
             title: '¿Finalizar este rol de pago?',
             message: 'Al finalizar, el rol queda SELLADO e inmutable: no se podrá regenerar ni editar, y servirá como comprobante oficial del período. Esto es lo que lo hace mejor que un Excel editable. ¿Confirmás?',
@@ -324,6 +346,7 @@ const payrollAdmin = (function () {
             danger: false
         });
         if (!ok) return;
+        _accionEnVuelo = true;
         try {
             await api('POST', `/runs/${runId}/finalize`);
             Notification.success('Rol finalizado y sellado');
@@ -336,6 +359,8 @@ const payrollAdmin = (function () {
         } catch (err) {
             // 409 = ya estaba finalizado.
             Notification.error('No se pudo finalizar: ' + err.message);
+        } finally {
+            _accionEnVuelo = false;
         }
     }
 

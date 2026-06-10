@@ -800,6 +800,12 @@ class PayrollController {
                 [RUN_STATUS_FINALIZED, req.user.id, runId, RUN_STATUS_DRAFT]
             );
             if (!result.changes) {
+                // changes=0: o se finalizó en paralelo, o se ELIMINÓ el borrador
+                // (deleteRun concurrente). Re-consultamos para un mensaje honesto.
+                const still = await db.queryOne('SELECT status FROM payroll_runs WHERE id = ?', [runId]);
+                if (!still) {
+                    return res.status(404).json({ success: false, message: 'La corrida ya no existe (fue eliminada)' });
+                }
                 return res.status(409).json({ success: false, message: 'La corrida ya fue finalizada por otra operación' });
             }
 

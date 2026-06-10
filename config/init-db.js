@@ -242,6 +242,8 @@ async function rebuildTimeOffRequestsSqlite() {
     await db.exec('PRAGMA foreign_keys=OFF');
     await db.exec('BEGIN');
     try {
+        // Defensa: limpiar una tabla temporal de un rebuild interrumpido previo.
+        await db.exec('DROP TABLE IF EXISTS time_off_requests_f1new');
         await db.exec(`CREATE TABLE time_off_requests_f1new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
@@ -370,6 +372,133 @@ async function migrateUsersAuthFields() {
     }
 }
 
+// Lista de columnas de payroll_details EN ORDEN (para el rebuild SQLite con
+// INSERT explícito, no SELECT *: robusto ante drift de orden).
+const PAYROLL_DETAILS_COLS = [
+    'id', 'run_id', 'employee_id',
+    'sueldo_base', 'fondos_reserva', 'decimo_tercero', 'decimo_cuarto',
+    'horas_extra', 'otros_ingresos', 'total_ingresos',
+    'base_aportable', 'aporte_personal', 'otros_descuentos', 'total_descuentos',
+    'neto_a_pagar', 'aporte_patronal', 'provisiones', 'costo_empresa',
+    'iess_personal_pct_snapshot', 'iess_patronal_pct_snapshot',
+    'fondos_reserva_pct_snapshot', 'sbu_snapshot',
+    'mensualiza_decimos_snapshot', 'paga_fondos_mensual_snapshot',
+    'warnings_json', 'created_at'
+].join(', ');
+
+// SQLite no soporta ALTER de FK → recrea payroll_details preservando datos,
+// índices y UNIQUE, cambiando SÓLO employee_id de CASCADE a RESTRICT (run_id
+// sigue CASCADE). Patrón de rebuild idéntico a rebuildTimeOffRequestsSqlite.
+async function rebuildPayrollDetailsSqlite() {
+    await db.exec('PRAGMA foreign_keys=OFF');
+    await db.exec('BEGIN');
+    try {
+        // Defensa de idempotencia: si un rebuild anterior se interrumpió y dejó la
+        // tabla temporal, la limpiamos para que el CREATE no falle con
+        // "already exists" (que dejaría el arranque en crash-loop irrecuperable).
+        await db.exec('DROP TABLE IF EXISTS payroll_details_v2new');
+        await db.exec(`CREATE TABLE payroll_details_v2new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            employee_id INTEGER NOT NULL,
+            sueldo_base REAL NOT NULL DEFAULT 0,
+            fondos_reserva REAL NOT NULL DEFAULT 0,
+            decimo_tercero REAL NOT NULL DEFAULT 0,
+            decimo_cuarto REAL NOT NULL DEFAULT 0,
+            horas_extra REAL NOT NULL DEFAULT 0,
+            otros_ingresos REAL NOT NULL DEFAULT 0,
+            total_ingresos REAL NOT NULL DEFAULT 0,
+            base_aportable REAL NOT NULL DEFAULT 0,
+            aporte_personal REAL NOT NULL DEFAULT 0,
+            otros_descuentos REAL NOT NULL DEFAULT 0,
+            total_descuentos REAL NOT NULL DEFAULT 0,
+            neto_a_pagar REAL NOT NULL DEFAULT 0,
+            aporte_patronal REAL NOT NULL DEFAULT 0,
+            provisiones REAL NOT NULL DEFAULT 0,
+            costo_empresa REAL NOT NULL DEFAULT 0,
+            iess_personal_pct_snapshot REAL NOT NULL,
+            iess_patronal_pct_snapshot REAL NOT NULL,
+            fondos_reserva_pct_snapshot REAL NOT NULL,
+            sbu_snapshot REAL NOT NULL,
+            mensualiza_decimos_snapshot INTEGER NOT NULL DEFAULT 0,
+            paga_fondos_mensual_snapshot INTEGER NOT NULL DEFAULT 0,
+            warnings_json TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (run_id, employee_id),
+            FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
+            FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE RESTRICT
+        )`);
+        await db.exec(`INSERT INTO payroll_details_v2new (${PAYROLL_DETAILS_COLS})
+                       SELECT ${PAYROLL_DETAILS_COLS} FROM payroll_details`);
+        await db.exec('DROP TABLE payroll_details');
+        await db.exec('ALTER TABLE payroll_details_v2new RENAME TO payroll_details');
+        await db.exec('CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id)');
+        await db.exec('CREATE INDEX IF NOT EXISTS idx_payroll_details_emp ON payroll_details(employee_id)');
+        await db.exec('COMMIT');
+    } catch (err) {
+        await db.exec('ROLLBACK');
+        throw err;
+    } finally {
+        await db.exec('PRAGMA foreign_keys=ON');
+    }
+}
+
+// Nómina v2: endurece la FK payroll_details.employee_id de CASCADE → RESTRICT.
+// Inmutabilidad a nivel DB: borrar un empleado NO debe destruir sus renglones en
+// roles SELLADOS (el guard app-side en deleteEmployee ya lo bloquea; esto es la
+// segunda capa). run_id sigue CASCADE: borrar un BORRADOR sí limpia sus detalles.
+// Idempotente: chequea la regla de borrado actual y no hace nada si ya migró.
+async function migratePayrollV2() {
+    if (db.driver === 'postgres') {
+        // ¿Existe la tabla? (to_regclass distingue "no existe" de "existe pero
+        // perdió la FK" — evita el skip silencioso si la FK fue dropeada a medias).
+        const tbl = await db.queryOne("SELECT to_regclass('public.payroll_details') AS t");
+        if (!tbl || !tbl.t) return;                       // la tabla aún no existe
+        // FK actual de employee_id, ACOTADA al schema public y determinista
+        // (los nombres de constraint son únicos por schema, no globales).
+        const fk = await db.queryOne(`
+            SELECT tc.constraint_name, rc.delete_rule
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.referential_constraints rc
+              ON rc.constraint_name = tc.constraint_name
+             AND rc.constraint_schema = tc.table_schema
+            JOIN information_schema.key_column_usage kcu
+              ON kcu.constraint_name = tc.constraint_name
+             AND kcu.table_schema = tc.table_schema
+            WHERE tc.table_schema = 'public'
+              AND tc.table_name = 'payroll_details'
+              AND tc.constraint_type = 'FOREIGN KEY'
+              AND kcu.column_name = 'employee_id'
+            ORDER BY tc.constraint_name
+            LIMIT 1
+        `);
+        if (fk && fk.delete_rule !== 'CASCADE') return;   // ya RESTRICT/NO ACTION
+        // CASCADE → migrar; FK ausente (raro: dropeada a medias) → re-crear.
+        // db.transaction garantiza BEGIN/COMMIT/ROLLBACK + release de la conexión
+        // del pool (no usar db.exec con BEGIN embebido: no libera bien en error).
+        await db.transaction(async (tx) => {
+            if (fk) {
+                await tx.execute(`ALTER TABLE payroll_details DROP CONSTRAINT "${fk.constraint_name}"`);
+            }
+            await tx.execute(`ALTER TABLE payroll_details
+                ADD CONSTRAINT payroll_details_employee_id_fkey
+                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE RESTRICT`);
+        });
+        console.log('🔒 Nómina v2: FK employee_id → RESTRICT (Postgres).');
+        return;
+    }
+    // SQLite
+    const exists = await db.queryOne(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_details'"
+    );
+    if (!exists) return;
+    const fks = await db.query('PRAGMA foreign_key_list(payroll_details)');
+    const empFk = fks.find(f => f.from === 'employee_id');
+    if (!empFk || empFk.on_delete !== 'CASCADE') return;  // ya migrado o sin FK CASCADE
+    await rebuildPayrollDetailsSqlite();
+    console.log('🔒 Nómina v2: FK employee_id → RESTRICT (SQLite rebuild).');
+}
+
 async function migratePayrollV1() {
     const isPg = db.driver === 'postgres';
 
@@ -438,7 +567,7 @@ async function migratePayrollV1() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (run_id, employee_id),
                 FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
-                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE RESTRICT
             );
             CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
             CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
@@ -507,7 +636,7 @@ async function migratePayrollV1() {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (run_id, employee_id),
                 FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
-                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+                FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE RESTRICT
             );
             CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_year, period_month);
             CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
@@ -778,21 +907,39 @@ async function seedSystemConfig() {
 }
 
 async function seedUsers() {
-    const adminPwd = bcrypt.hashSync('admin123', 10);
-    const testPwd = bcrypt.hashSync('user123', 10);
+    const isProd = process.env.NODE_ENV === 'production';
+    const cols = ['username', 'email', 'password', 'full_name', 'role', 'must_change_password'];
 
-    // Los usuarios de seed se crean con must_change_password=1 — la primera
-    // vez que entren con la pass de ejemplo deben cambiarla. Si ya existen
-    // (INSERT OR IGNORE), no se tocan; la migración previa ya los marcó.
+    // Admin: en prod el password sale de SEED_ADMIN_PASSWORD si está seteado; si
+    // no, cae a 'admin123' PERO con must_change_password=1 (la primera entrada lo
+    // fuerza a cambiar). insertOrIgnore: si el admin YA existe, NO se pisa su pass.
+    const adminPwd = bcrypt.hashSync(process.env.SEED_ADMIN_PASSWORD || 'admin123', 10);
     await db.execute(
-        insertOrIgnore('users', ['username', 'email', 'password', 'full_name', 'role', 'must_change_password'], 'username'),
+        insertOrIgnore('users', cols, 'username'),
         ['admin', 'admin@powerbi.local', adminPwd, 'Administrador', 'admin', 1]
     );
+
+    if (isProd) {
+        // El usuario de PRUEBA no debe vivir en producción. No lo sembramos, y si
+        // quedó de un seed viejo y nunca se usó (pass de ejemplo intacta), lo
+        // DESACTIVAMOS para que no sea un foothold. Idempotente (sólo toca el test
+        // user pristino y una sola vez; no borra datos).
+        const r = await db.execute(
+            "UPDATE users SET is_active = 0 WHERE username = 'usuario1' AND email = 'usuario1@test.com' AND must_change_password = 1 AND is_active = 1",
+            []
+        );
+        if (r.changes) console.log('🔒 Usuario de prueba "usuario1" desactivado en producción.');
+        console.log('👤 Usuario admin listo (test user no se siembra en prod).');
+        return;
+    }
+
+    // Dev: sí sembramos el usuario de prueba para poder testear.
+    const testPwd = bcrypt.hashSync('user123', 10);
     await db.execute(
-        insertOrIgnore('users', ['username', 'email', 'password', 'full_name', 'role', 'must_change_password'], 'username'),
+        insertOrIgnore('users', cols, 'username'),
         ['usuario1', 'usuario1@test.com', testPwd, 'Usuario de Prueba', 'user', 1]
     );
-    console.log('👤 Usuarios admin / usuario1 listos');
+    console.log('👤 Usuarios admin / usuario1 listos (dev).');
 }
 
 async function seedSampleReports() {
@@ -1112,6 +1259,7 @@ async function init() {
     // instalaciones existentes (las tablas nuevas ya las creó loadSchema).
     await migrateTimeOffWorkflowF1();
     await migratePayrollV1();          // Nómina v1.2: tablas + columnas + parámetros legales
+    await migratePayrollV2();          // Nómina v2: FK employee_id CASCADE → RESTRICT (inmutabilidad)
     await seedSystemConfig();
     await seedUsers();
     await seedSampleReports();
@@ -1130,8 +1278,13 @@ async function init() {
     // las preexistentes en una DB legacy que ya tenía reports/docs.
     await migrateCategoriesFK();
     console.log('✅ Base de datos inicializada correctamente');
-    console.log('👤 Usuario admin: admin / admin123');
-    console.log('👤 Usuario test: usuario1 / user123');
+    // Sólo mostramos credenciales de ejemplo en DEV. En prod la pass del admin
+    // sale de SEED_ADMIN_PASSWORD (o exige cambio en el primer login) y no hay
+    // usuario de prueba → no imprimimos nada engañoso.
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('👤 Usuario admin: admin / admin123');
+        console.log('👤 Usuario test: usuario1 / user123');
+    }
 }
 
 // Si se ejecuta como script (node config/init-db.js), correr y salir.

@@ -6,8 +6,12 @@ npm-debug.log
 .gitignore
 database/*.db
 database/*.db-*
+data
 *.log
 .DS_Store
 README.md
 .vscode
 .idea
+.claude
+_*_out
+_*spec_out

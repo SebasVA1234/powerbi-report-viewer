@@ -664,7 +664,10 @@ CREATE TABLE IF NOT EXISTS payroll_details (
 
     UNIQUE (run_id, employee_id),
     FOREIGN KEY (run_id) REFERENCES payroll_runs (id) ON DELETE CASCADE,
-    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE CASCADE
+    -- employee_id RESTRICT: borrar un empleado con historial de roles NO debe
+    -- destruir sus recibos sellados (inmutabilidad). El delete se bloquea en el
+    -- controller (deleteEmployee → 409) y, en segunda capa, acá a nivel DB.
+    FOREIGN KEY (employee_id) REFERENCES hr_employees (id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_payroll_details_run ON payroll_details(run_id);

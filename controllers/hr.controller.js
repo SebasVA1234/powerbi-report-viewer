@@ -830,6 +830,9 @@ class HrController {
     //   - hr_documents.employee_id
     //   - holiday_attendance.employee_id
     //   - time_off_requests.employee_id
+    // PERO payroll_details.employee_id es ON DELETE RESTRICT: si el empleado tiene
+    // historial de roles de pago, el delete se BLOQUEA con 409 (ver guard abajo)
+    // para no destruir recibos sellados.
     // Reportes directos quedan con manager_id=NULL (ON DELETE SET NULL).
     // Si el empleado tiene user vinculado, el user NO se borra: solo se
     // desvincula (hr_employees.user_id quedaba en SET NULL pero como
@@ -844,11 +847,11 @@ class HrController {
             if (!employee) {
                 return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
             }
-            // Inmutabilidad de nómina: payroll_details.employee_id es ON DELETE
-            // CASCADE, así que borrar un empleado destruiría sus renglones en roles
-            // ya FINALIZADOS (recibos con valor legal) y descuadraría los totales
-            // del run. Si tiene historial de nómina, bloqueamos el hard-delete:
-            // para una baja real, RRHH usa status='terminated'.
+            // Inmutabilidad de nómina: aunque payroll_details.employee_id es ON
+            // DELETE RESTRICT (segunda capa, bloquea a nivel DB), chequeamos acá
+            // para devolver un 409 CLARO en vez de un error críptico de FK. Borrar
+            // un empleado destruiría sus renglones en roles FINALIZADOS (recibos con
+            // valor legal). Para una baja real, RRHH usa status='terminated'.
             const tieneNomina = await db.queryOne(
                 'SELECT 1 AS x FROM payroll_details WHERE employee_id = ? LIMIT 1', [id]
             );
