@@ -1,7 +1,7 @@
 const fs = require('fs');
 const db = require('../config/db');
 const { getUserContext } = require('./rbac.controller');
-const { buildVisibilityFilter, canUserAccessResource } = require('./permission_resolver');
+const { buildVisibilityFilter, canUserAccessResource, buildDownloadFlagSql } = require('./permission_resolver');
 const storage = require('../config/storage');
 
 class DocumentController {
@@ -17,6 +17,9 @@ class DocumentController {
 
             let documents;
             const filter = await buildVisibilityFilter('document', ctx, userId, 'd');
+            // F2: columna computada can_download (0/1) por documento, sin N consultas.
+            // Sus binds van en el SELECT → preceden a los del WHERE.
+            const dl = buildDownloadFlagSql(ctx, userId, 'd');
 
             if (filter === null) {
                 documents = await db.query(`
@@ -24,21 +27,23 @@ class DocumentController {
                         d.id, d.name, d.description, d.category,
                         d.file_name, d.mime_type, d.file_size, d.is_active,
                         d.created_at, d.updated_at,
-                        1 as can_view
+                        1 as can_view,
+                        ${dl.sql} as can_download
                     FROM documents d
                     WHERE d.is_active = 1
                     ORDER BY d.category, d.name
-                `);
+                `, dl.params);
             } else {
                 documents = await db.query(`
                     SELECT
                         d.id, d.name, d.description, d.category,
                         d.file_name, d.mime_type, d.file_size, d.is_active, d.created_at,
-                        1 as can_view
+                        1 as can_view,
+                        ${dl.sql} as can_download
                     FROM documents d
                     WHERE d.is_active = 1 AND ${filter.whereClause}
                     ORDER BY d.category, d.name
-                `, filter.params);
+                `, [...dl.params, ...filter.params]);
             }
 
             await db.execute(
@@ -146,6 +151,11 @@ class DocumentController {
                 });
             }
             if (!isAdmin) document.can_view = 1;
+            // F2: si puede descargar el PDF original (admin, o grant 'download'
+            // directo/heredado). read.all NO concede descarga.
+            document.can_download = isAdmin
+                ? 1
+                : (await canUserAccessResource(userId, 'document', Number(id), 'download') ? 1 : 0);
 
             if (isAdmin) {
                 document.users_with_access = await db.query(`
@@ -221,6 +231,89 @@ class DocumentController {
         } catch (error) {
             console.error('Error al transmitir documento:', error);
             res.status(500).json({ success: false, message: 'Error al cargar documento' });
+        }
+    }
+
+    // F2: descarga del PDF ORIGINAL como adjunto (attachment), a diferencia de
+    // streamDocument que lo sirve inline para el visor view-only. Exige la
+    // acción 'download' (más fuerte que ver). Para no filtrar la existencia de
+    // documentos a quien ni siquiera puede verlos: 404 si no puede ver, 403 si
+    // puede ver pero no descargar.
+    static async downloadDocument(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.user.id;
+            const isAdmin = req.user.role === 'admin';
+
+            const row = await db.queryOne(`
+                SELECT storage_key, file_data, mime_type, file_name, is_active
+                FROM documents WHERE id = ?
+            `, [id]);
+
+            if (!row || !row.is_active) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+
+            // Capa 1: ¿puede siquiera VERLO? Si no, 404 (no revelar existencia).
+            const canView = isAdmin || await canUserAccessResource(userId, 'document', Number(id), 'view');
+            if (!canView) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado o sin permisos' });
+            }
+
+            // Capa 2: ¿puede DESCARGARLO? Lo ve pero quizá sólo en el visor → 403.
+            const canDownload = isAdmin || await canUserAccessResource(userId, 'document', Number(id), 'download');
+            if (!canDownload) {
+                // Auditar el intento DENEGADO: en documentos sensibles (PII) es
+                // señal de abuso interno. Best-effort, no rompe la respuesta.
+                try {
+                    await db.execute(
+                        'INSERT INTO access_logs (user_id, document_id, action, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)',
+                        [userId, id, 'download_denied', req.ip || 'unknown', req.get('user-agent') || '']
+                    );
+                } catch (_) { /* un fallo de auditoría no debe tumbar la respuesta */ }
+                return res.status(403).json({ success: false, message: 'No tiene permiso para descargar este documento' });
+            }
+
+            await db.execute(
+                'INSERT INTO access_logs (user_id, document_id, action, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)',
+                [userId, id, 'download_document', req.ip || 'unknown', req.get('user-agent') || '']
+            );
+
+            // Nombre de archivo seguro para el header: sin CR/LF, comillas ni
+            // backslash (header injection), ASCII imprimible para el fallback.
+            const safeName = (String(row.file_name || 'documento.pdf')
+                .replace(/[\r\n"\\]/g, '')
+                .replace(/[^\x20-\x7E]/g, '_')
+                .slice(0, 200)) || 'documento.pdf';
+
+            res.setHeader('Content-Type', row.mime_type || 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+
+            if (row.storage_key) {
+                const filePath = storage.resolveStoragePath(row.storage_key);
+                if (!fs.existsSync(filePath)) {
+                    console.error(`Storage miss para documento ${id}: ${filePath}`);
+                    return res.status(404).json({ success: false, message: 'Archivo del documento no se encuentra' });
+                }
+                fs.createReadStream(filePath).pipe(res);
+                return;
+            }
+            // Legacy: documentos viejos con BLOB en DB. Si no hay ni archivo en
+            // el volumen ni BLOB, la fila está corrupta → 404 (no servir 0 bytes
+            // con un 200 engañoso).
+            // Ojo: createDocument deja file_data = Buffer vacío (sentinel NOT NULL)
+            // cuando el archivo vive en el volumen. Sin storage_key Y con buffer
+            // vacío/nulo = fila corrupta.
+            if (!row.file_data || row.file_data.length === 0) {
+                console.error(`Documento ${id} sin storage_key ni file_data (fila corrupta)`);
+                return res.status(404).json({ success: false, message: 'Archivo del documento no se encuentra' });
+            }
+            res.end(row.file_data);
+        } catch (error) {
+            console.error('Error al descargar documento:', error);
+            res.status(500).json({ success: false, message: 'Error al descargar documento' });
         }
     }
 

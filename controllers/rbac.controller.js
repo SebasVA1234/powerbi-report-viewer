@@ -391,8 +391,17 @@ class RbacController {
                 return res.status(400).json({ success: false, message: 'resource_id y principal_id requeridos' });
             }
             if (!Array.isArray(actions) || actions.length === 0) actions = ['view'];
-            actions = actions.filter(a => ['view','export','edit'].includes(a));
+            // 'download' (F2): la acción que habilita bajar el PDF original de un
+            // documento. Antes faltaba en la whitelist y se descartaba silenciosamente.
+            actions = actions.filter(a => ['view','export','edit','download'].includes(a));
             if (actions.length === 0) actions = ['view'];
+            // Invariante: poder descargar/exportar implica poder ver. Forzamos
+            // 'view' presente para que NUNCA exista un ACL download-sin-view (que
+            // haría que la lista ofrezca el botón pero el endpoint —que exige
+            // 'view' antes que 'download'— responda 404).
+            if ((actions.includes('download') || actions.includes('export')) && !actions.includes('view')) {
+                actions.unshift('view');
+            }
 
             const actionsJson = JSON.stringify(actions);
 

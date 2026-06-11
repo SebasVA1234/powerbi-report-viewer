@@ -44,6 +44,28 @@ async function migrateAccessLogsDocCol() {
     }
 }
 
+// F2: agrega user_document_permissions.can_download (espejo de
+// user_report_permissions.can_export). El sistema de documentos es view-only
+// por defecto; este flag habilita la DESCARGA del PDF original a usuarios,
+// departamentos o roles concretos. Aditiva e idempotente, driver-aware.
+async function migrateDocumentDownloadFlag() {
+    if (db.driver === 'sqlite') {
+        const cols = await db.query("PRAGMA table_info(user_document_permissions)");
+        if (!cols.some(c => c.name === 'can_download')) {
+            await db.exec('ALTER TABLE user_document_permissions ADD COLUMN can_download INTEGER DEFAULT 0');
+            console.log('🔧 Migración: columna can_download añadida a user_document_permissions');
+        }
+    } else {
+        const r = await db.query(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = 'user_document_permissions' AND column_name = 'can_download'"
+        );
+        if (r.length === 0) {
+            await db.exec('ALTER TABLE user_document_permissions ADD COLUMN can_download INTEGER DEFAULT 0');
+            console.log('🔧 Migración: columna can_download añadida a user_document_permissions');
+        }
+    }
+}
+
 // PR-1c: agrega reports.category_id y documents.category_id (FK a categories).
 // Migra los strings existentes de reports.category / documents.category a
 // filas en categories. Idempotente: detecta el estado y aplica solo lo que falta.
@@ -1255,6 +1277,7 @@ async function init() {
     await migrateUsersAuthFields();
     await migrateUsersTotpFields();
     await migrateDocumentsStorageKey();
+    await migrateDocumentDownloadFlag();   // F2: flag de descarga de documentos
     // F1: agrega las columnas del workflow multinivel a time_off_requests en
     // instalaciones existentes (las tablas nuevas ya las creó loadSchema).
     await migrateTimeOffWorkflowF1();
@@ -1295,4 +1318,4 @@ if (require.main === module) {
         .catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { init };
+module.exports = { init, migrateDocumentDownloadFlag };

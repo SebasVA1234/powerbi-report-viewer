@@ -23,6 +23,9 @@ const upload = multer({
 router.get('/my-documents', authMiddleware, DocumentController.getMyDocuments);
 router.get('/:id', authMiddleware, DocumentController.getDocumentById);
 router.get('/:id/stream', authMiddleware, DocumentController.streamDocument);
+// F2: descarga del PDF original (Content-Disposition: attachment). Exige la
+// acción 'download' (más fuerte que ver) — el gating vive en el controller.
+router.get('/:id/download', authMiddleware, DocumentController.downloadDocument);
 
 // Rutas de ADMINISTRADOR
 router.get('/', authMiddleware, adminMiddleware, DocumentController.getAllDocuments);

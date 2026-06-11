@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS user_document_permissions (
     user_id INTEGER NOT NULL,
     document_id INTEGER NOT NULL,
     can_view INTEGER DEFAULT 1,
+    -- F2: habilita la DESCARGA del PDF original (el visor es view-only por
+    -- defecto). Espejo de user_report_permissions.can_export. Default 0 =
+    -- sólo ver. La descarga es una compuerta explícita y más sensible.
+    can_download INTEGER DEFAULT 0,
     granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     granted_by INTEGER,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,

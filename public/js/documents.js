@@ -126,6 +126,11 @@ function createDocumentCard(doc) {
                     </div>
                     <div class="report-actions">
                         <button class="btn-view-report" onclick="openDocument(${doc.id})">Ver</button>
+                        ${doc.can_download ? `
+                        <button class="btn-download-report" onclick="downloadDocument(${doc.id})" title="Descargar el PDF original">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Descargar
+                        </button>` : ''}
                     </div>
                 </div>
             </div>
@@ -200,6 +205,27 @@ async function openDocument(documentId) {
     } catch (error) {
         console.error('Error al abrir documento:', error);
         Notification.error(error.message || 'Error al abrir documento');
+    }
+}
+
+// F2: descarga del PDF ORIGINAL (sólo aparece si el doc trae can_download del
+// backend). A diferencia del visor view-only, esto SÍ guarda el archivo en el
+// equipo del usuario — es la compuerta controlada por permiso.
+async function downloadDocument(documentId) {
+    try {
+        const { blob, filename } = await API.fetchDocumentDownload(documentId);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // Liberar la URL del blob tras un instante (dar tiempo a la descarga).
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        Notification.success('Documento descargado');
+    } catch (err) {
+        Notification.error(err.message || 'No se pudo descargar el documento');
     }
 }
 
@@ -528,8 +554,16 @@ async function _docFetchAclMap(resourceType, resourceId) {
     const j = await r.json();
     const acls = (j.data && j.data.acls) || [];
     const map = { user: new Map(), department: new Map(), role: new Map() };
-    acls.forEach(a => map[a.principal_type] && map[a.principal_type].set(a.principal_id, a.id));
-    return map;
+    // F2: además del id de la fila ACL, registramos quién tiene la acción 'download'.
+    const download = { user: new Set(), department: new Set(), role: new Set() };
+    acls.forEach(a => {
+        if (!map[a.principal_type]) return;
+        map[a.principal_type].set(a.principal_id, a.id);
+        let acts = a.actions;
+        try { if (typeof acts === 'string') acts = JSON.parse(acts); } catch (_) { acts = []; }
+        if (Array.isArray(acts) && acts.includes('download')) download[a.principal_type].add(a.principal_id);
+    });
+    return { map, download };
 }
 
 function _docSetupAccessSubTabs() {
@@ -550,22 +584,50 @@ function _docSetupAccessSubTabs() {
     tabBodies.forEach(c => c.classList.toggle('active', c.id === 'doc-access-users-tab'));
 }
 
-function _docRenderCheckList(containerId, items, currentIds, klass) {
+// F2: cada fila tiene 2 controles — ACCESO (ver) y DESCARGA. La descarga sólo
+// se habilita si hay acceso (no se puede descargar lo que no se puede ver).
+// Estilos inline con rgba neutro + currentColor → legible en tema claro y oscuro.
+function _docRenderAccessList(containerId, items, accessIds, downloadIds, accessKlass, downloadKlass) {
     const container = document.getElementById(containerId);
     if (!items || items.length === 0) {
         container.innerHTML = '<p class="empty">Sin elementos disponibles.</p>';
         return;
     }
-    container.innerHTML = `
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        ${items.map(it => `
-            <label class="checkbox-row" style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border-radius:8px; background:rgba(255,255,255,0.04); cursor:pointer;">
-                <input type="checkbox" class="${klass}" value="${it.id}" ${currentIds.has(it.id) ? 'checked' : ''}>
-                <span>${escapeHtml(it.label)}</span>
+    const dlIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    container.innerHTML = items.map(it => {
+        const hasAccess = accessIds.has(it.id);
+        const hasDownload = downloadIds.has(it.id);
+        return `
+        <div class="doc-access-row" style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.55rem 0.75rem; border-radius:8px; background:rgba(127,127,127,0.10); margin-bottom:6px;">
+            <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; flex:1; min-width:0;">
+                <input type="checkbox" class="${accessKlass}" value="${it.id}" ${hasAccess ? 'checked' : ''}
+                    onchange="_docToggleRowAccess(this, '${downloadKlass}')">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.label)}</span>
             </label>
-        `).join('')}
-        </div>
-    `;
+            <label class="doc-dl-toggle" title="Permitir descargar el PDF original"
+                style="display:inline-flex; align-items:center; gap:0.35rem; cursor:pointer; font-size:12px; white-space:nowrap; opacity:${hasAccess ? '1' : '0.45'};">
+                <input type="checkbox" class="${downloadKlass}" value="${it.id}" ${hasDownload ? 'checked' : ''} ${hasAccess ? '' : 'disabled'}>
+                ${dlIcon} Descarga
+            </label>
+        </div>`;
+    }).join('');
+}
+
+// Habilita/limpia el checkbox de descarga de una fila según su acceso.
+function _docToggleRowAccess(accessCb, downloadKlass) {
+    const row = accessCb.closest('.doc-access-row');
+    if (!row) return;
+    const dl = row.querySelector('.' + downloadKlass);
+    const lbl = row.querySelector('.doc-dl-toggle');
+    if (!dl) return;
+    if (accessCb.checked) {
+        dl.disabled = false;
+        if (lbl) lbl.style.opacity = '1';
+    } else {
+        dl.disabled = true;
+        dl.checked = false;   // sin acceso no hay descarga
+        if (lbl) lbl.style.opacity = '0.45';
+    }
 }
 
 async function showDocumentAccessModal(documentId, documentName) {
@@ -580,29 +642,35 @@ async function showDocumentAccessModal(documentId, documentName) {
     _docSetupAccessSubTabs();
 
     try {
-        const [{ users, departments, roles }, aclMap, matrixResp] = await Promise.all([
+        const [{ users, departments, roles }, aclData, matrixResp] = await Promise.all([
             _docFetchPrincipalsCatalogue(),
             _docFetchAclMap('document', documentId),
             API.getDocumentsPermissionsMatrix()
         ]);
+        const aclMap = aclData.map;            // Map por tipo → id de la fila ACL
+        const aclDownload = aclData.download;  // Set por tipo → quién tiene 'download'
         const matrix = (matrixResp.data && matrixResp.data.matrix) || [];
+
+        // Legacy (usuarios): quién VE y quién además DESCARGA.
         const legacyUserIds = new Set();
+        const legacyDownloadIds = new Set();
         matrix.forEach(row => {
             const p = row.permissions[documentId];
             if (p && p.can_view) legacyUserIds.add(row.user.id);
+            if (p && p.can_download) legacyDownloadIds.add(row.user.id);
         });
-        const aclUserIds = new Set([...aclMap.user.keys()]);
-        const allUserIds = new Set([...legacyUserIds, ...aclUserIds]);
+        const allUserIds = new Set([...legacyUserIds, ...aclMap.user.keys()]);
+        const allUserDownload = new Set([...legacyDownloadIds, ...aclDownload.user]);
 
-        _docRenderCheckList('doc-user-list-checkboxes',
+        _docRenderAccessList('doc-user-list-checkboxes',
             users.filter(u => u.role !== 'admin').map(u => ({ id: u.id, label: `${u.full_name || u.username} (@${u.username})` })),
-            allUserIds, 'doc-user-check');
-        _docRenderCheckList('doc-dept-list-checkboxes',
+            allUserIds, allUserDownload, 'doc-user-check', 'doc-user-dl-check');
+        _docRenderAccessList('doc-dept-list-checkboxes',
             departments.map(d => ({ id: d.id, label: d.name })),
-            new Set(aclMap.department.keys()), 'doc-dept-check');
-        _docRenderCheckList('doc-role-list-checkboxes',
+            new Set(aclMap.department.keys()), new Set(aclDownload.department), 'doc-dept-check', 'doc-dept-dl-check');
+        _docRenderAccessList('doc-role-list-checkboxes',
             roles.map(r => ({ id: r.id, label: r.name + ' [' + r.code + ']' })),
-            new Set(aclMap.role.keys()), 'doc-role-check');
+            new Set(aclMap.role.keys()), new Set(aclDownload.role), 'doc-role-check', 'doc-role-dl-check');
 
         _docAccessState = { documentId, initialAcls: aclMap, legacyUsers: legacyUserIds };
     } catch (err) {
@@ -611,49 +679,59 @@ async function showDocumentAccessModal(documentId, documentName) {
     }
 }
 
-async function _docDiffAclSave(resourceType, resourceId, principalType, currentMap, desiredIds) {
+async function _docDiffAclSave(resourceType, resourceId, principalType, currentMap, desiredIds, downloadIds) {
     const desired = new Set(desiredIds);
+    const dl = new Set(downloadIds || []);
     const current = new Set(currentMap.keys());
-    const toAdd = [...desired].filter(id => !current.has(id));
     const toRemove = [...current].filter(id => !desired.has(id));
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + Utils.getToken() };
-    let added = 0, removed = 0;
-    for (const id of toAdd) {
+    let saved = 0, removed = 0;
+    // Upsert de TODOS los deseados: crea el ACL o actualiza sus actions (con o
+    // sin 'download'). El endpoint POST /acl hace ON CONFLICT DO UPDATE, así que
+    // un cambio de sólo-el-flag-de-descarga sobre un ACL existente se persiste.
+    for (const id of desired) {
+        const actions = dl.has(id) ? ['view', 'download'] : ['view'];
         const r = await fetch('/api/rbac/acl', {
             method: 'POST', headers,
-            body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, principal_type: principalType, principal_id: id, actions: ['view'] })
+            body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, principal_type: principalType, principal_id: id, actions })
         });
-        if (r.ok) added++;
+        if (r.ok) saved++;
     }
     for (const id of toRemove) {
         const aclId = currentMap.get(id);
         const r = await fetch('/api/rbac/acl/' + aclId, { method: 'DELETE', headers });
         if (r.ok) removed++;
     }
-    return { added, removed };
+    return { saved, removed };
 }
 
 async function saveDocumentAccessAll() {
     const documentId = parseInt(document.getElementById('doc-access-document-id').value, 10);
     const saveBtn = document.querySelector('#doc-access-modal .btn-primary');
-    const userIds = [...document.querySelectorAll('.doc-user-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
-    const deptIds = [...document.querySelectorAll('.doc-dept-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
-    const roleIds = [...document.querySelectorAll('.doc-role-check')].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const pick = (cls) => [...document.querySelectorAll('.' + cls)].filter(cb => cb.checked).map(cb => Number(cb.value));
+    const userIds = pick('doc-user-check');
+    const deptIds = pick('doc-dept-check');
+    const roleIds = pick('doc-role-check');
+    // Descargas: el checkbox está deshabilitado si no hay acceso, así que un
+    // marcado siempre implica acceso. El backend además lo restringe a userIds.
+    const userDl = pick('doc-user-dl-check');
+    const deptDl = pick('doc-dept-dl-check');
+    const roleDl = pick('doc-role-dl-check');
 
     saveBtn.disabled = true;
     const orig = saveBtn.innerText;
     saveBtn.innerText = 'Guardando...';
     try {
-        const userResp = await API.syncDocumentPermissions(documentId, userIds);
+        const userResp = await API.syncDocumentPermissions(documentId, userIds, userDl);
         if (!userResp || !userResp.success) throw new Error(userResp && userResp.message || 'fallo guardando usuarios');
 
-        const deptDiff = await _docDiffAclSave('document', documentId, 'department', _docAccessState.initialAcls.department, deptIds);
-        const roleDiff = await _docDiffAclSave('document', documentId, 'role',       _docAccessState.initialAcls.role,       roleIds);
+        await _docDiffAclSave('document', documentId, 'department', _docAccessState.initialAcls.department, deptIds, deptDl);
+        await _docDiffAclSave('document', documentId, 'role',       _docAccessState.initialAcls.role,       roleIds, roleDl);
 
+        const totalDl = userDl.length + deptDl.length + roleDl.length;
         Notification.success(
-            `Guardado: ${userIds.length} user${userIds.length !== 1 ? 's' : ''} · ` +
-            `+${deptDiff.added}/-${deptDiff.removed} depto · ` +
-            `+${roleDiff.added}/-${roleDiff.removed} rol`
+            `Accesos guardados: ${userIds.length} usuario(s), ${deptIds.length} depto(s), ${roleIds.length} rol(es)` +
+            (totalDl ? ` · ${totalDl} con descarga` : '')
         );
         closeModal('doc-access-modal');
         if (typeof loadAllDocumentsAdmin === 'function') loadAllDocumentsAdmin();
@@ -729,6 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Exponer globals
 window.loadMyDocuments = loadMyDocuments;
 window.openDocument = openDocument;
+window.downloadDocument = downloadDocument;
 window.closePdfViewer = closePdfViewer;
 window.pdfNextPage = pdfNextPage;
 window.pdfPrevPage = pdfPrevPage;
@@ -739,6 +818,7 @@ window.showCreateDocumentModal = showCreateDocumentModal;
 window.editDocument = editDocument;
 window.deleteDocument = deleteDocument;
 window.showDocumentAccessModal = showDocumentAccessModal;
+window._docToggleRowAccess = _docToggleRowAccess;
 window.saveDocumentPermissions = saveDocumentPermissions;
 window.loadDocumentsPermissionsMatrix = loadDocumentsPermissionsMatrix;
 window.toggleDocPermissionCell = toggleDocPermissionCell;

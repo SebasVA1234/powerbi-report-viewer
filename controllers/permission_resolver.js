@@ -112,15 +112,24 @@ async function buildVisibilityFilter(resourceType, userContext, userId, tableAli
 // Útil para endpoints que reciben un :id (getReportById, streamDocument).
 async function canUserAccessResource(userId, resourceType, resourceId, action = 'view') {
     const ctx = await getUserContext(userId);
+    if (ctx.isAdmin) return true;
+    // `<resource>s.read.all` concede VER (y exportar reportes), pero NO
+    // descargar: la descarga del PDF original es una compuerta sensible y
+    // explícita (el visor es view-only por diseño). Sólo admin o un grant
+    // 'download' directo/heredado la abre. F2.
     const readAllPerm = `${resourceType}s.read.all`;
-    if (ctx.isAdmin || ctx.permissions.has(readAllPerm)) return true;
+    if (action !== 'download' && ctx.permissions.has(readAllPerm)) return true;
 
     // Legacy
     const legacyTable = resourceType === 'report'
         ? 'user_report_permissions'
         : 'user_document_permissions';
     const legacyIdCol = resourceType === 'report' ? 'report_id' : 'document_id';
-    const legacyCol = action === 'export' ? 'can_export' : 'can_view';
+    // Columna legacy según la acción: reportes usan can_export; documentos,
+    // can_download (F2). 'view' por defecto.
+    let legacyCol = 'can_view';
+    if (action === 'export') legacyCol = 'can_export';
+    else if (action === 'download') legacyCol = 'can_download';
     const legacy = await db.queryOne(
         `SELECT 1 FROM ${legacyTable}
          WHERE ${legacyIdCol} = ? AND user_id = ? AND ${legacyCol} = 1`,
@@ -209,4 +218,66 @@ function aclGrantsAction(actionsJson, action) {
     }
 }
 
-module.exports = { buildVisibilityFilter, canUserAccessResource, aclGrantsAction };
+// F2: fragmento SQL (columna 0/1) que indica si el user puede DESCARGAR el
+// documento de la fila (alias.id). Se usa como columna computada en la lista
+// de "mis documentos" para evitar N consultas. Fuentes (cualquiera basta):
+//   - legacy user_document_permissions.can_download = 1
+//   - resource_acl con la acción 'download' (directo, por depto o por rol)
+// El match del JSON usa LIKE '%"download"%' — exacto para nuestro formato
+// (actions siempre es un array de strings quoteados, p.ej. ["view","download"]).
+// PARIDAD: igual que buildVisibilityFilter (el filtro de visibilidad de la
+// grilla), esta función NO evalúa la herencia por CATEGORÍA. La frontera de
+// autorización real es canUserAccessResource (el endpoint), que sí la considera.
+function buildDownloadFlagSql(userContext, userId, tableAlias = 'd') {
+    if (userContext.isAdmin) return { sql: '1', params: [] };
+
+    const aliasId = `${tableAlias}.id`;
+    const deptIds = userContext.departments.map(d => d.id);
+    const roleIds = userContext.roles.map(r => r.id);
+    const parts = [];
+    const params = [];
+
+    // Legacy directo al user.
+    parts.push(
+        `EXISTS (SELECT 1 FROM user_document_permissions
+                 WHERE document_id = ${aliasId} AND user_id = ? AND can_download = 1)`
+    );
+    params.push(userId);
+
+    // ACL: asignación directa al user con acción 'download'.
+    parts.push(
+        `EXISTS (SELECT 1 FROM resource_acl
+                 WHERE resource_type = 'document' AND resource_id = ${aliasId}
+                   AND principal_type = 'user' AND principal_id = ?
+                   AND actions LIKE '%"download"%')`
+    );
+    params.push(userId);
+
+    // ACL: heredada por departamento.
+    if (deptIds.length > 0) {
+        const ph = deptIds.map(() => '?').join(',');
+        parts.push(
+            `EXISTS (SELECT 1 FROM resource_acl
+                     WHERE resource_type = 'document' AND resource_id = ${aliasId}
+                       AND principal_type = 'department' AND principal_id IN (${ph})
+                       AND actions LIKE '%"download"%')`
+        );
+        params.push(...deptIds);
+    }
+
+    // ACL: heredada por rol.
+    if (roleIds.length > 0) {
+        const ph = roleIds.map(() => '?').join(',');
+        parts.push(
+            `EXISTS (SELECT 1 FROM resource_acl
+                     WHERE resource_type = 'document' AND resource_id = ${aliasId}
+                       AND principal_type = 'role' AND principal_id IN (${ph})
+                       AND actions LIKE '%"download"%')`
+        );
+        params.push(...roleIds);
+    }
+
+    return { sql: `(CASE WHEN (${parts.join(' OR ')}) THEN 1 ELSE 0 END)`, params };
+}
+
+module.exports = { buildVisibilityFilter, canUserAccessResource, aclGrantsAction, buildDownloadFlagSql };

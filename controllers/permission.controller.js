@@ -395,19 +395,19 @@ class PermissionController {
                  FROM documents WHERE is_active = 1 ORDER BY category, name`
             );
             const permissions = await db.query(
-                'SELECT user_id, document_id, can_view FROM user_document_permissions'
+                'SELECT user_id, document_id, can_view, can_download FROM user_document_permissions'
             );
 
             const permissionMap = {};
             permissions.forEach(p => {
-                permissionMap[`${p.user_id}-${p.document_id}`] = { can_view: p.can_view };
+                permissionMap[`${p.user_id}-${p.document_id}`] = { can_view: p.can_view, can_download: p.can_download };
             });
 
             const matrix = users.map(user => {
                 const userPermissions = {};
                 documents.forEach(doc => {
                     userPermissions[doc.id] = permissionMap[`${user.id}-${doc.id}`]
-                        || { can_view: false };
+                        || { can_view: false, can_download: false };
                 });
                 return { user, permissions: userPermissions };
             });
@@ -422,8 +422,17 @@ class PermissionController {
     static async syncDocumentPermissions(req, res) {
         try {
             const { documentId } = req.params;
-            const { userIds = [] } = req.body;
+            const { userIds = [], downloadUserIds = [] } = req.body;
             const grantedBy = req.user.id;
+
+            // F2: subconjunto de userIds que además pueden DESCARGAR el PDF
+            // original. Un id en downloadUserIds que no esté en userIds se ignora
+            // (no se puede descargar lo que no se puede ver).
+            const downloadSet = new Set(
+                (Array.isArray(downloadUserIds) ? downloadUserIds : [])
+                    .map(n => parseInt(n, 10))
+                    .filter(n => Number.isInteger(n) && n > 0)
+            );
 
             const doc = await db.queryOne('SELECT name FROM documents WHERE id = ?', [documentId]);
             if (!doc) {
@@ -465,14 +474,16 @@ class PermissionController {
                     );
                 }
                 for (const userId of targetIds) {
+                    const dl = downloadSet.has(userId) ? 1 : 0;
                     await tx.execute(
-                        `INSERT INTO user_document_permissions (user_id, document_id, can_view, granted_by)
-                         VALUES (?, ?, 1, ?)
+                        `INSERT INTO user_document_permissions (user_id, document_id, can_view, can_download, granted_by)
+                         VALUES (?, ?, 1, ?, ?)
                          ON CONFLICT(user_id, document_id) DO UPDATE SET
                              can_view = 1,
+                             can_download = excluded.can_download,
                              granted_by = excluded.granted_by,
                              granted_at = CURRENT_TIMESTAMP`,
-                        [userId, documentId, grantedBy]
+                        [userId, documentId, dl, grantedBy]
                     );
                 }
             });

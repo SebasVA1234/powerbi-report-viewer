@@ -244,6 +244,29 @@ const API = {
         return await response.arrayBuffer();
     },
 
+    // F2: descarga el PDF ORIGINAL como blob autenticado + su nombre de archivo
+    // (leído del header Content-Disposition). El caller dispara el "guardar como".
+    async fetchDocumentDownload(id) {
+        const token = Utils.getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const response = await fetch(`${CONFIG.API_BASE_URL}${API_ENDPOINTS.DOCUMENTS}/${id}/download`, {
+            headers,
+            cache: 'no-store'
+        });
+        if (!response.ok) {
+            let msg = 'No se pudo descargar el documento';
+            try { msg = (await response.json()).message || msg; } catch (_) {}
+            throw new Error(msg);
+        }
+        let filename = `documento-${id}.pdf`;
+        const cd = response.headers.get('Content-Disposition') || '';
+        const m = /filename="?([^"]+)"?/.exec(cd);
+        if (m && m[1]) filename = m[1].trim();
+        return { blob: await response.blob(), filename };
+    },
+
     async getDocumentsPermissionsMatrix() {
         return this.request(API_ENDPOINTS.DOCUMENTS_PERMISSIONS_MATRIX);
     },
@@ -269,10 +292,10 @@ const API = {
     },
 
     // Sincroniza lista completa de usuarios con acceso a un documento (atómico)
-    async syncDocumentPermissions(documentId, userIds) {
+    async syncDocumentPermissions(documentId, userIds, downloadUserIds = []) {
         return this.request(`${API_ENDPOINTS.PERMISSIONS}/documents/${documentId}/sync`, {
             method: 'POST',
-            body: JSON.stringify({ userIds })
+            body: JSON.stringify({ userIds, downloadUserIds })
         });
     },
 

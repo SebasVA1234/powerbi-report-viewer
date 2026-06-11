@@ -866,6 +866,33 @@ body {
     transform: translateY(-1px);
 }
 
+/* F2: botón "Descargar" — variante outline del botón Ver. Usa sólo el color de
+   marca (magenta) + transparente: legible en tema claro y oscuro sin depender
+   de tokens de superficie. */
+.btn-download-report {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    color: var(--ecualand-magenta);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--ecualand-magenta);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: var(--transition);
+}
+.btn-download-report svg {
+    width: 14px;
+    height: 14px;
+}
+.btn-download-report:hover {
+    background: var(--ecualand-magenta);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
 .btn-export {
     background: var(--gray-100);
     color: var(--text-primary);
