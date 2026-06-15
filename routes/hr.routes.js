@@ -79,6 +79,14 @@ router.delete('/attendance/:attendanceId',
 // Saldo del banco de días compensados por empleado.
 router.get('/employees/:id/compensated-balance', authMiddleware, HrController.getCompensatedBalance);
 
+// F3: Vacaciones (LECTURA, saldo derivado on-the-fly — sin tabla de saldos).
+// El gating fino own/team/all va IN-CONTROLLER (como compensated-balance): el saldo
+// individual y los períodos devuelven 403 fuera de scope; la grilla recorta filas.
+// No hay rutas mutativas nuevas — los guards de saldo viven en los endpoints F1.
+router.get('/employees/:id/vacation-balance', authMiddleware, HrController.obtenerSaldoVacaciones);
+router.get('/employees/:id/vacation-periods', authMiddleware, HrController.listarPeriodosVacaciones);
+router.get('/vacation-grid',                  authMiddleware, HrController.obtenerGrillaVacaciones);
+
 // PR-3c + F1: Solicitudes de tiempo libre con firma + aprobación multinivel + adjuntos.
 //   - listar: cualquier user logueado (la visibilidad la filtra el controller).
 //   - crear+firmar: hr.timeoff.request (el propio empleado; RRHH/admin por otro).

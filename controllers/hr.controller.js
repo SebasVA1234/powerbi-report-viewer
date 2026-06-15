@@ -78,6 +78,241 @@ async function computeCompensatedBalance(conn, employeeId) {
     return { accrued, used, balance: accrued - used };
 }
 
+// ============================================================
+// F3: Saldo de vacaciones (derivado, nunca almacenado)
+// ============================================================
+// Mismo espíritu que computeCompensatedBalance: el saldo NO vive en ninguna
+// tabla; se calcula on-the-fly desde hire_date + las solicitudes 'vacaciones'.
+// NO se toca el schema (x-db-changes: none). Spec: _f3spec_out/10-spec.md §2.
+
+// Estados de una solicitud 'vacaciones' que OCUPAN saldo (lo "reservan") mientras
+// está EN VUELO. Incluye 'pending' legacy a propósito (D-06, modo defensivo): si
+// quedó alguna fila vieja sin decidir, reservarla es lo seguro; si no hay ninguna,
+// incluir el estado no cuesta nada. Divergencia DELIBERADA respecto de
+// COMPENSATED_ACTIVE_STATES (que NO incluye 'pending'): acá sí reserva.
+const VACACIONES_RESERVE_STATES = ['pending', 'pending_jefe', 'pending_tthh'];
+
+// Horizonte de la ALERTA de caducidad (D-03): cuántos días hacia adelante miramos
+// para avisar "estos días caducan pronto si no los tomás". Constante de módulo
+// para que no quede mágico inline ni se desincronice entre saldo y grilla.
+const HORIZONTE_ALERTA_DIAS = 90;
+
+// Tope legal del adicional de antigüedad (Art. 71 CT-Ec): el extra por año arranca
+// en el 6.º año y sube 1/año hasta topar en 15 (devengo anual máximo 30).
+const VAC_EXTRA_DIAS_TOPE = 15;
+const VAC_DIAS_BASE_ANUAL = 15;            // 15 días base por año (Art. 69)
+const VAC_ANIO_INICIO_EXTRA = 5;           // el extra empieza tras 5 años completos
+const VAC_VENTANA_ARRASTRE_ANIOS = 3;      // Art. 75: se acumula hasta 3 años; lo más viejo caduca
+
+// Descompone una fecha YA canonicalizada ('YYYY-MM-DD') en enteros {year, month, day}.
+// Trabajamos con enteros (no objetos Date) para el cálculo de aniversarios: así
+// evitamos de raíz el corrimiento de día del dual-driver (Postgres devuelve DATE
+// como objeto Date a medianoche local; SQLite como string). canonicalDate ya
+// neutralizó esa diferencia; acá sólo partimos el string.
+function partesFecha(canon) {
+    const [year, month, day] = canon.split('-').map(Number);
+    return { year, month, day };
+}
+
+// Valida que un string de query sea YYYY-MM-DD con mes 1-12 y día 1-31. El regex
+// solo no alcanza: dejaría pasar basura como '2024-13-99'. (No valida 30-feb: es
+// un edge raro y no crítico — daría un saldo levemente off, nunca crash ni fuga.)
+function esFechaCalendarioValida(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return false;
+    const mes = Number(m[2]), dia = Number(m[3]);
+    return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31;
+}
+
+// Clave comparable (mes*100 + día) para ordenar dentro del año SIN construir Date.
+// Truco 29-feb (D-10): un ingreso 29-feb cumple su aniversario el 1-mar en años no
+// bisiestos. Como en un año no bisiesto febrero llega sólo a 28, la condición
+// "(asOf.mes,asOf.día) >= (2,29)" se cumple recién el 1-mar — exactamente lo que
+// pide la ley. Por eso la comparación de tuplas resuelve sola el caso bisiesto.
+function claveMesDia(p) {
+    return p.month * 100 + p.day;
+}
+
+// Aniversarios calendario CUMPLIDOS entre hire y asOf (D-10: NO /365.25, que marca
+// 0 años en el 1er aniversario de un año no bisiesto). Nunca negativo.
+function aniosCumplidos(hire, asOf) {
+    let anios = asOf.year - hire.year;
+    if (claveMesDia(asOf) < claveMesDia(hire)) anios -= 1;
+    return Math.max(0, anios);
+}
+
+// Días GANADOS acumulados a una cantidad de años cumplidos (fórmula cerrada §2.1):
+//   base = 15 * n; extra = Σ_{k=6..n} min(15, k−5).
+// La suma cerrada del extra para n ≥ 5: m=min(n,20); (m−5)(m−4)/2 + 15·max(0,n−20).
+function diasGanadosPorAnios(anios) {
+    const base = VAC_DIAS_BASE_ANUAL * anios;
+    if (anios <= VAC_ANIO_INICIO_EXTRA) return base;        // n ≤ 5 → sin extra
+    const m = Math.min(anios, 20);
+    const extraHastaTope = ((m - VAC_ANIO_INICIO_EXTRA) * (m - 4)) / 2;
+    const extraTopado = VAC_EXTRA_DIAS_TOPE * Math.max(0, anios - 20);
+    return base + extraHastaTope + extraTopado;
+}
+
+// Devengo del PERÍODO EN CURSO (annual_entitlement, 15..30): lo que gana el empleado
+// por el año que está corriendo = 15 + min(15, max(0, años−5)). Topa en 30.
+function devengoAnualActual(anios) {
+    return VAC_DIAS_BASE_ANUAL + Math.min(VAC_EXTRA_DIAS_TOPE, Math.max(0, anios - VAC_ANIO_INICIO_EXTRA));
+}
+
+// Suma una cantidad de DÍAS calendario a una fecha {year,month,day} usando Date.UTC
+// (UTC evita el corrimiento por DST/offset). Devuelve {year,month,day}. Sólo se usa
+// para el +90 días de la alerta, que sí cruza meses; la antigüedad NO usa esto.
+function sumarDias(p, dias) {
+    const t = Date.UTC(p.year, p.month - 1, p.day) + dias * 24 * 60 * 60 * 1000;
+    const d = new Date(t);
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+// Resta años calendario a una fecha {year,month,day} conservando (mes,día). Se usa
+// para "accrued(asOf − 3 años)": recomputar la antigüedad a esa fecha desplazada
+// contra el MISMO hire_date da el devengado de hace >3 años (criterio FIFO §2.2).
+function restarAnios(p, anios) {
+    return { year: p.year - anios, month: p.month, day: p.day };
+}
+
+// Formatea {year,month,day} a 'YYYY-MM-DD' (para expiry_date del schema).
+function formatearFecha(p) {
+    return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+// Saldo de vacaciones de un empleado a la fecha de corte `asOf` (default = hoy).
+// 100% derivado (§0). `conn` puede ser `db` o un `tx` (ambos exponen queryOne), así
+// que sirve dentro y fuera de transacción — igual que computeCompensatedBalance.
+//
+// opts.excludeRequestId: excluye UNA fila (por id) del término days_taken. Lo usa el
+// guard de aprobación TTHH (§2.6.2) para que la PROPIA solicitud —ya en pending_tthh,
+// que reserva saldo— no se cuente contra sí misma (auto-bloqueo 409 falso). Como
+// FIFO y la alerta DERIVAN de days_taken, la exclusión propaga sola.
+//
+// Devuelve TODOS los campos de SaldoVacaciones (§3): years_of_service, days_accrued,
+// days_taken, days_expired, days_available, days_expiring_soon, next_expiry,
+// annual_entitlement, y además employee_id/as_of (los completa el endpoint).
+async function computeVacationBalance(conn, employeeId, asOf, opts = {}) {
+    const excludeRequestId = opts.excludeRequestId != null ? opts.excludeRequestId : null;
+
+    // Fecha de corte: default hoy (TZ servidor). Siempre vía canonicalDate para
+    // que un asOf string o Date se normalice idéntico (dual-driver).
+    const asOfCanon = canonicalDate(asOf != null ? asOf : new Date());
+    const asOfParts = partesFecha(asOfCanon);
+
+    const emp = await conn.queryOne(
+        'SELECT hire_date FROM hr_employees WHERE id = ?',
+        [employeeId]
+    );
+
+    // D-09: sin hire_date → todo en 0, next_expiry null. La lectura NO falla (no hay
+    // 422); el mensaje de "cargá la fecha de ingreso" lo da el guard 409 al CREAR.
+    if (!emp || emp.hire_date == null) {
+        return {
+            years_of_service: 0,
+            days_accrued: 0,
+            days_taken: 0,
+            days_expired: 0,
+            days_available: 0,
+            days_expiring_soon: 0,
+            next_expiry: null,
+            annual_entitlement: VAC_DIAS_BASE_ANUAL  // mínimo legal (15) para no romper el schema 15..30
+        };
+    }
+
+    const hireParts = partesFecha(canonicalDate(emp.hire_date));
+
+    // --- Días GANADOS a la fecha de corte (§2.1) ---
+    const aniosActuales = aniosCumplidos(hireParts, asOfParts);
+    const daysAccrued = diasGanadosPorAnios(aniosActuales);
+
+    // --- Días TOMADOS (§2.3, filtro EXACTO) ---
+    // En vuelo (VACACIONES_RESERVE_STATES) reserva SIEMPRE; aprobadas descuentan
+    // salvo waived (discount_decision <> 'waived', NO = 'discount': las históricas
+    // pre-F1 quedaron en 'pending' y fueron goces reales → restan). La exclusión
+    // por id (excludeRequestId) saca la propia solicitud del término.
+    const reservePlaceholders = VACACIONES_RESERVE_STATES.map(() => '?').join(',');
+    const takenSql = `
+        SELECT COALESCE(SUM(days_count), 0) AS total
+        FROM time_off_requests
+        WHERE employee_id = ?
+          AND request_type = 'vacaciones'
+          AND (
+                status IN (${reservePlaceholders})
+             OR (status = 'approved' AND discount_decision <> 'waived')
+          )
+          ${excludeRequestId != null ? 'AND id <> ?' : ''}`;
+    const takenParams = [employeeId, ...VACACIONES_RESERVE_STATES];
+    if (excludeRequestId != null) takenParams.push(excludeRequestId);
+    const takenRow = await conn.queryOne(takenSql, takenParams);
+    // Number(): Postgres devuelve NUMERIC/SUM como string (dual-driver §1.3).
+    const daysTaken = Number(takenRow.total || 0);
+
+    // --- Caducidad FIFO (Art. 75 / §2.2) ---
+    // old_now = lo devengado hace >3 años (recomputar antigüedad a asOf−3a contra el
+    // MISMO hire). Lo tomado consume primero lo más viejo (FIFO): lo viejo que sobra
+    // caduca. days_available NO se clampa (D-07): negativo = sobre-goce por datos
+    // inconsistentes, el frontend lo pinta en rojo.
+    const asOfMenos3 = restarAnios(asOfParts, VAC_VENTANA_ARRASTRE_ANIOS);
+    const oldNow = diasGanadosPorAnios(aniosCumplidos(hireParts, asOfMenos3));
+    const daysExpired = Math.max(0, oldNow - daysTaken);
+    const daysAvailable = (daysAccrued - daysTaken) - daysExpired;
+
+    // --- ALERTA de caducidad (§2.2): días que caducan dentro de 90 días ---
+    // old_h = lo devengado hace >3 años MIRANDO desde asOf+90d. La resta de
+    // days_expired evita doble-contar lo YA caducado (coherente con K2 del Mermaid).
+    const asOfMas90 = sumarDias(asOfParts, HORIZONTE_ALERTA_DIAS);
+    const asOfMas90Menos3 = restarAnios(asOfMas90, VAC_VENTANA_ARRASTRE_ANIOS);
+    const oldH = diasGanadosPorAnios(aniosCumplidos(hireParts, asOfMas90Menos3));
+    const daysExpiringSoon = Math.max(0, oldH - daysTaken) - daysExpired;
+
+    const nextExpiry = computeNextExpiry(hireParts, asOfParts, daysTaken, daysExpired, aniosActuales);
+
+    return {
+        years_of_service: aniosActuales,
+        days_accrued: daysAccrued,
+        days_taken: daysTaken,
+        days_expired: daysExpired,
+        days_available: daysAvailable,
+        days_expiring_soon: daysExpiringSoon,
+        next_expiry: nextExpiry,
+        annual_entitlement: devengoAnualActual(aniosActuales)
+    };
+}
+
+// Próximo evento de caducidad FUTURO con días en riesgo (§2.2 / nodo K3 del Mermaid).
+// Cada "bloque" devengado al cumplir el año k caduca en el aniversario k+3. Iteramos
+// los aniversarios y buscamos el PRIMER cruce (aniversario_k + 3 años) estrictamente
+// posterior a asOf donde todavía quedan días sin gozar (FIFO). Devuelve
+// { expiry_date:'YYYY-MM-DD', days_at_risk } o null.
+//
+// Bound de la iteración: años de servicio + 4 (cubre los bloques cuya caducidad aún
+// no ocurrió). days_at_risk en un cruce = (devengado a ese cruce − 3a) − tomado −
+// (lo ya caducado a hoy): lo que se sumaría a days_expired si ese cruce pasara sin goce.
+function computeNextExpiry(hireParts, asOfParts, daysTaken, daysExpiredNow, aniosActuales) {
+    const limite = aniosActuales + 4;
+    for (let k = 1; k <= limite; k++) {
+        // Fecha en que el bloque del año k cumple sus 3 años de arrastre y caduca.
+        const fechaCaducidad = restarAnios(hireParts, -k - VAC_VENTANA_ARRASTRE_ANIOS);
+        // Sólo cruces FUTUROS (estrictamente después de asOf).
+        if (claveCompletaMenor(asOfParts, fechaCaducidad)) {
+            // Lo devengado >3 años visto desde ese cruce = devengado al año k.
+            const oldEnCruce = diasGanadosPorAnios(k);
+            const enRiesgo = Math.max(0, oldEnCruce - daysTaken) - daysExpiredNow;
+            if (enRiesgo > 0) {
+                return { expiry_date: formatearFecha(fechaCaducidad), days_at_risk: enRiesgo };
+            }
+        }
+    }
+    return null;
+}
+
+// ¿a < b? para fechas {year,month,day} sin construir Date (compara año, luego mes·100+día).
+function claveCompletaMenor(a, b) {
+    if (a.year !== b.year) return a.year < b.year;
+    return claveMesDia(a) < claveMesDia(b);
+}
+
 // Calcula el content_hash de la firma sobre la cadena canónica EXACTA del
 // hash_input de la spec. ATA el payload SUSTANTIVO de la solicitud (tipo,
 // fechas, días, motivo) ADEMÁS de la identidad del firmante. Orden y separador
@@ -1005,6 +1240,19 @@ class HrController {
         return requestType === 'vacaciones' ? 'pending_jefe' : 'pending_tthh';
     }
 
+    // F3 (§2.5): días CALENDARIO de un período = (date_to − date_from) + 1, ambos
+    // inclusive. Días corridos (sáb/dom/feriados DENTRO del rango SÍ cuentan). Usamos
+    // Date.UTC (no Date local) para que la diferencia en ms no se corra por DST/offset.
+    // Entradas validadas YYYY-MM-DD por el caller. Sirve al guard anti-inflado.
+    static _recomputeDiasCalendario(dateFrom, dateTo) {
+        const [fy, fm, fd] = dateFrom.split('-').map(Number);
+        const [ty, tm, td] = dateTo.split('-').map(Number);
+        const msPorDia = 24 * 60 * 60 * 1000;
+        const desde = Date.UTC(fy, fm - 1, fd);
+        const hasta = Date.UTC(ty, tm - 1, td);
+        return Math.round((hasta - desde) / msPorDia) + 1;
+    }
+
     // Resuelve quiénes pueden aprobar el PASO JEFE (sólo vacaciones) de una
     // solicitud: el jefe inmediato (hr_employees.manager_id → su user_id) y,
     // como fallback, los jefes del departamento del solicitante
@@ -1079,6 +1327,17 @@ class HrController {
                 return res.status(400).json({ success: false, message: 'reason debe ser texto de hasta 1000 caracteres' });
             }
 
+            // ---- F3 guard 1 (SÓLO vacaciones): days_count debe = recompute(date_from,date_to) ----
+            // Anti-inflado de días (§2.5 / D-08): valida y RECHAZA, NO muta el input.
+            // Gated por request_type para NO afectar feriado_compensado/permiso/enfermedad,
+            // que comparten este endpoint y NO tienen esta regla de días calendario.
+            if (request_type === 'vacaciones') {
+                const diasRecomputados = HrController._recomputeDiasCalendario(date_from, date_to);
+                if (days !== diasRecomputados) {
+                    return res.status(400).json({ success: false, message: 'days_count no coincide con el período (date_from..date_to)' });
+                }
+            }
+
             // ---- Validación estructural de la firma (forma) ----
             if (!signature || typeof signature !== 'object') {
                 return res.status(400).json({ success: false, message: 'signature es obligatoria' });
@@ -1140,6 +1399,23 @@ class HrController {
                 }
             }
 
+            // ---- F3 guard 2 pre-tx (SÓLO vacaciones): saldo de vacaciones suficiente ----
+            // Chequeo de UX (mensaje claro y temprano); la garantía autoritativa es el
+            // re-check INTRA-tx de abajo (TOCTOU-safe). 409 = conflicto de estado (§2.6).
+            // El mensaje incluye nota especial si el empleado no tiene hire_date (D-09).
+            if (request_type === 'vacaciones') {
+                const { days_available: disponible } = await computeVacationBalance(db, targetEmployee.id);
+                if (days > disponible) {
+                    const sinFecha = targetEmployee.hire_date == null
+                        ? ' (empleado sin fecha de ingreso registrada — pedí a RRHH que la cargue)'
+                        : '';
+                    return res.status(409).json({
+                        success: false,
+                        message: `Saldo de vacaciones insuficiente. Disponible: ${disponible} día(s), pediste ${days}.${sinFecha}`
+                    });
+                }
+            }
+
             // ---- Derivar estado inicial: vacaciones → jefe SÓLO si hay aprobador-jefe ----
             let initialStatus = HrController.deriveInitialStatus(request_type);
             if (initialStatus === 'pending_jefe') {
@@ -1160,20 +1436,38 @@ class HrController {
                 // rápida y mensaje claro), pero dos solicitudes concurrentes del MISMO
                 // empleado podrían pasarlo a la vez y gastar el crédito dos veces. Acá,
                 // ya dentro de la tx, RE-validamos el saldo de forma autoritativa.
-                if (request_type === 'feriado_compensado') {
-                    // En Postgres (READ COMMITTED) tomamos un advisory lock por empleado
-                    // para serializar estas creaciones; se libera solo al cerrar la tx.
-                    // En SQLite no hace falta: better-sqlite3 es sync y de conexión única,
-                    // así que la transacción ya serializa el proceso.
+                // Tanto feriado_compensado (banco) como vacaciones validan saldo de
+                // forma serializada: en Postgres (READ COMMITTED) tomamos un advisory
+                // lock por empleado para que dos creaciones concurrentes del MISMO
+                // empleado no gasten el mismo saldo dos veces (se libera al cerrar la
+                // tx). En SQLite no hace falta: better-sqlite3 es sync y de conexión
+                // única, así que la transacción ya serializa el proceso.
+                if (request_type === 'feriado_compensado' || request_type === 'vacaciones') {
                     if (db.driver === 'postgres') {
                         await tx.query('SELECT pg_advisory_xact_lock(?::bigint)', [targetEmployee.id]);
                     }
-                    // Re-lectura AUTORITATIVA del saldo dentro de la tx (misma fuente
-                    // de verdad que el resto del banco), ya serializada por el lock.
+                }
+                if (request_type === 'feriado_compensado') {
+                    // Re-lectura AUTORITATIVA del saldo del banco dentro de la tx (misma
+                    // fuente de verdad), ya serializada por el lock.
                     const { balance: txBalance } = await computeCompensatedBalance(tx, targetEmployee.id);
                     if (days > txBalance) {
                         const e = new Error(`Saldo insuficiente. Disponible: ${txBalance} día(s), pediste ${days}.`);
                         e.statusCode = 400; // lo honra el catch → 400 limpio, no 500
+                        throw e;
+                    }
+                }
+                if (request_type === 'vacaciones') {
+                    // F3 guard 2 intra-tx (autoritativo): re-chequeo del saldo de
+                    // vacaciones ya serializado. Si entre el pre-check y acá otra
+                    // solicitud consumió saldo, este 409 lo corta sin reservar de más.
+                    const { days_available: txDisponible } = await computeVacationBalance(tx, targetEmployee.id);
+                    if (days > txDisponible) {
+                        const sinFecha = targetEmployee.hire_date == null
+                            ? ' (empleado sin fecha de ingreso registrada — pedí a RRHH que la cargue)'
+                            : '';
+                        const e = new Error(`Saldo de vacaciones insuficiente. Disponible: ${txDisponible} día(s), pediste ${days}.${sinFecha}`);
+                        e.statusCode = 409; // conflicto de estado, no 400
                         throw e;
                     }
                 }
@@ -1343,6 +1637,7 @@ class HrController {
             // que dejan claro los chequeos de dueño). Son la misma columna.
             const reqRow = await db.queryOne(`
                 SELECT r.id, r.status, r.request_type, r.employee_id, r.discount_decision,
+                       r.days_count,
                        e.user_id, e.user_id AS owner_user_id, e.manager_id, e.department_id, e.full_name
                 FROM time_off_requests r
                 JOIN hr_employees e ON e.id = r.employee_id
@@ -1418,45 +1713,77 @@ class HrController {
             balanceMarked = true;
         }
 
-        await db.transaction(async (tx) => {
-            if (action === 'reject') {
-                await tx.execute(
-                    `UPDATE time_off_requests
-                     SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
-                         rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE id = ?`,
-                    [actorUserId, comment, reqRow.id]
-                );
-            } else if (level === 'jefe') {
-                await tx.execute(
-                    `UPDATE time_off_requests
-                     SET status = 'pending_tthh', updated_at = CURRENT_TIMESTAMP
-                     WHERE id = ?`,
-                    [reqRow.id]
-                );
-            } else {
-                // Aprobación final de TTHH. Si la decisión de descuento sigue en
-                // 'pending', la fijamos en 'discount' por defecto (TTHH puede luego
-                // hacer waive vía /discount-decision). balance_marked_at es el
-                // gancho que F3/F4 leerá para ejecutar el descuento numérico.
-                const nextDiscount = reqRow.discount_decision === 'pending' ? 'discount' : reqRow.discount_decision;
-                await tx.execute(
-                    `UPDATE time_off_requests
-                     SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
-                         discount_decision = ?, balance_marked_at = CURRENT_TIMESTAMP,
-                         updated_at = CURRENT_TIMESTAMP
-                     WHERE id = ?`,
-                    [actorUserId, nextDiscount, reqRow.id]
-                );
-            }
+        try {
+            await db.transaction(async (tx) => {
+                if (action === 'reject') {
+                    await tx.execute(
+                        `UPDATE time_off_requests
+                         SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                             rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?`,
+                        [actorUserId, comment, reqRow.id]
+                    );
+                } else if (level === 'jefe') {
+                    await tx.execute(
+                        `UPDATE time_off_requests
+                         SET status = 'pending_tthh', updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?`,
+                        [reqRow.id]
+                    );
+                } else {
+                    // F3 guard 3 (SÓLO vacaciones, nivel tthh, approve): ANTES de sellar
+                    // balance_marked_at, re-chequeamos el saldo EXCLUYENDO esta misma
+                    // solicitud (§2.6.2). Sin la exclusión se auto-bloquearía: la propia
+                    // fila ya está en pending_tthh, que RESERVA saldo (se contaría contra
+                    // sí misma → 409 falso). Si el saldo cambió desde la creación (otra
+                    // vacación se aprobó primero) y ya no alcanza → 409, NO se aprueba,
+                    // NO se sella. Gated por request_type para no tocar otros flujos F1.
+                    if (reqRow.request_type === 'vacaciones') {
+                        if (db.driver === 'postgres') {
+                            await tx.query('SELECT pg_advisory_xact_lock(?::bigint)', [reqRow.employee_id]);
+                        }
+                        const saldoSinEsta = await computeVacationBalance(
+                            tx, reqRow.employee_id, new Date(), { excludeRequestId: reqRow.id }
+                        );
+                        const diasSolicitud = Number(reqRow.days_count);
+                        if (diasSolicitud > saldoSinEsta.days_available) {
+                            const e = new Error(`Saldo de vacaciones insuficiente. Disponible: ${saldoSinEsta.days_available} día(s), pediste ${diasSolicitud}.`);
+                            e.statusCode = 409; // rollback de la tx → NO aprueba, NO sella
+                            throw e;
+                        }
+                    }
 
-            await tx.execute(
-                `INSERT INTO hr_approval_steps
-                 (request_id, step_order, step_level, approver_user_id, action, comment)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [reqRow.id, stepOrder, level, actorUserId, action, comment]
-            );
-        });
+                    // Aprobación final de TTHH. Si la decisión de descuento sigue en
+                    // 'pending', la fijamos en 'discount' por defecto (TTHH puede luego
+                    // hacer waive vía /discount-decision). balance_marked_at es el
+                    // gancho que F3/F4 leerá para ejecutar el descuento numérico.
+                    const nextDiscount = reqRow.discount_decision === 'pending' ? 'discount' : reqRow.discount_decision;
+                    await tx.execute(
+                        `UPDATE time_off_requests
+                         SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
+                             discount_decision = ?, balance_marked_at = CURRENT_TIMESTAMP,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?`,
+                        [actorUserId, nextDiscount, reqRow.id]
+                    );
+                }
+
+                await tx.execute(
+                    `INSERT INTO hr_approval_steps
+                     (request_id, step_order, step_level, approver_user_id, action, comment)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [reqRow.id, stepOrder, level, actorUserId, action, comment]
+                );
+            });
+        } catch (err) {
+            // El 409 del guard de saldo se devuelve tal cual (la tx ya hizo rollback,
+            // así que nada se aprobó/selló). Cualquier otro error sube al catch de
+            // _decideTimeOff → 500 genérico.
+            if (err && err.statusCode) {
+                return res.status(err.statusCode).json({ success: false, message: err.message });
+            }
+            throw err;
+        }
 
         return res.json({
             success: true,
@@ -1640,6 +1967,271 @@ class HrController {
             res.status(500).json({ success: false, message: 'Error al obtener el historial' });
         }
     }
+
+    // ============================================================
+    // F3: Endpoints de LECTURA del saldo de vacaciones (sin tabla de saldos)
+    // ============================================================
+
+    // Comparte el chequeo de visibilidad own/team/all de los endpoints individuales
+    // (saldo + períodos). MISMO patrón que getCompensatedBalance:
+    //   - el propio empleado SIEMPRE ve lo suyo (isSelf);
+    //   - hr.read.all/admin ven a cualquiera;
+    //   - hr.read.team ve sólo si el empleado está en getVisibleEmployeeIds.
+    // Devuelve null si está autorizado, o un objeto { code, message } para cortar
+    // (404 empleado inexistente / 403 fuera de scope). Sin fuga de PII.
+    static async _checkEmployeeVisibility(req, employeeId) {
+        const exists = await db.queryOne('SELECT id FROM hr_employees WHERE id = ?', [employeeId]);
+        if (!exists) return { code: 404, message: 'Empleado no encontrado' };
+
+        const ctx = await getUserContext(req.user.id, req);
+        const me = await db.queryOne('SELECT id FROM hr_employees WHERE user_id = ?', [req.user.id]);
+        const isSelf = me && me.id === employeeId;
+        const canSeeAll = ctx.isAdmin || ctx.permissions.has('hr.read.all');
+
+        if (!isSelf && !canSeeAll) {
+            const visible = await getVisibleEmployeeIds(req.user.id);
+            if (visible !== null && !visible.includes(employeeId)) {
+                return { code: 403, message: 'Sin permisos para este empleado' };
+            }
+        }
+        return null;
+    }
+
+    // GET /api/hr/employees/:id/vacation-balance?as_of= — saldo derivado de un empleado.
+    // El cálculo vive en computeVacationBalance (mismo espíritu que getCompensatedBalance).
+    static async obtenerSaldoVacaciones(req, res) {
+        try {
+            const employeeId = Number(req.params.id);
+            if (!Number.isInteger(employeeId) || employeeId < 1) {
+                return res.status(400).json({ success: false, message: 'id de empleado inválido' });
+            }
+            // Deny-first: visibilidad ANTES de validar el resto de inputs.
+            const deny = await HrController._checkEmployeeVisibility(req, employeeId);
+            if (deny) return res.status(deny.code).json({ success: false, message: deny.message });
+
+            // as_of opcional: YYYY-MM-DD con mes/día en rango (default = hoy en el helper).
+            const asOf = req.query.as_of;
+            if (asOf !== undefined && !esFechaCalendarioValida(asOf)) {
+                return res.status(400).json({ success: false, message: 'as_of debe ser una fecha válida YYYY-MM-DD' });
+            }
+
+            const saldo = await computeVacationBalance(db, employeeId, asOf);
+            const asOfCanon = canonicalDate(asOf != null ? asOf : new Date());
+            return res.json({
+                success: true,
+                data: { employee_id: employeeId, as_of: asOfCanon, ...saldo }
+            });
+        } catch (err) {
+            console.error('obtenerSaldoVacaciones:', err);
+            res.status(500).json({ success: false, message: 'Error al calcular saldo de vacaciones' });
+        }
+    }
+
+    // GET /api/hr/employees/:id/vacation-periods?year=&status= — una fila por solicitud
+    // 'vacaciones'. El Nº de memorándum es DERIVADO del id (D-04), nunca entrada manual.
+    static async listarPeriodosVacaciones(req, res) {
+        try {
+            const employeeId = Number(req.params.id);
+            if (!Number.isInteger(employeeId) || employeeId < 1) {
+                return res.status(400).json({ success: false, message: 'id de empleado inválido' });
+            }
+
+            // Deny-first: visibilidad ANTES de validar filtros o tocar la DB.
+            const deny = await HrController._checkEmployeeVisibility(req, employeeId);
+            if (deny) return res.status(deny.code).json({ success: false, message: deny.message });
+
+            // Validar filtros opcionales ANTES de tocar la DB (400 si inválidos).
+            const conditions = ['r.employee_id = ?', "r.request_type = 'vacaciones'"];
+            const params = [employeeId];
+
+            if (req.query.year !== undefined) {
+                const year = Number(req.query.year);
+                if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+                    return res.status(400).json({ success: false, message: 'year debe ser un entero entre 2000 y 2100' });
+                }
+                // Filtra por AÑO de date_from. En SQL comparamos por rango de fechas
+                // (no por EXTRACT/strftime) para no divergir entre drivers.
+                conditions.push('r.date_from >= ? AND r.date_from <= ?');
+                params.push(`${year}-01-01`, `${year}-12-31`);
+            }
+            if (req.query.status !== undefined) {
+                const validStatus = ['pending_jefe', 'pending_tthh', 'approved', 'rejected', 'cancelled'];
+                if (!validStatus.includes(req.query.status)) {
+                    return res.status(400).json({ success: false, message: `status inválido. Válidos: ${validStatus.join(', ')}` });
+                }
+                conditions.push('r.status = ?');
+                params.push(req.query.status);
+            }
+
+            const rows = await db.query(`
+                SELECT r.id, r.date_from, r.date_to, r.days_count, r.status,
+                       r.discount_decision, r.approved_at
+                FROM time_off_requests r
+                WHERE ${conditions.join(' AND ')}
+                ORDER BY r.date_from DESC, r.id DESC
+            `, params);
+
+            const periods = rows.map(r => HrController._mapPeriodoVacaciones(employeeId, r));
+            return res.json({
+                success: true,
+                data: { employee_id: employeeId, periods, total: periods.length }
+            });
+        } catch (err) {
+            console.error('listarPeriodosVacaciones:', err);
+            res.status(500).json({ success: false, message: 'Error al listar períodos de vacaciones' });
+        }
+    }
+
+    // Mapea una fila de time_off_requests al shape PeriodoVacaciones (§3).
+    //   - memo_number: MEMO-VAC-{año de date_from}-{id 4 dígitos} (derivado, D-04).
+    //   - taken: descontó saldo = aprobada-no-waived O en vuelo (mismo criterio §2.3).
+    static _mapPeriodoVacaciones(employeeId, r) {
+        const dateFrom = canonicalDate(r.date_from);
+        const anio = dateFrom.slice(0, 4);
+        const memoNumber = `MEMO-VAC-${anio}-${String(r.id).padStart(4, '0')}`;
+        const taken = (r.status === 'approved' && r.discount_decision !== 'waived')
+            || VACACIONES_RESERVE_STATES.includes(r.status);
+        return {
+            id: r.id,
+            memo_number: memoNumber,
+            date_from: dateFrom,
+            date_to: canonicalDate(r.date_to),
+            days_count: Number(r.days_count),   // dual-driver: PG NUMERIC → string
+            status: r.status,
+            discount_decision: r.discount_decision,
+            taken,
+            approved_at: r.approved_at != null ? r.approved_at : null
+        };
+    }
+
+    // GET /api/hr/vacation-grid?as_of=&year=&department_id=&employee_id=&include_terminated=
+    // Reproduce VACACIONES.xlsx: una fila por empleado VISIBLE, con ganados/tomados/
+    // disponible ('FALTAN') a una fecha de corte. La visibilidad RECORTA filas (NO 403):
+    // empleado=1 fila, jefe=su equipo, RRHH/admin=todos (mismo patrón que listTimeOffRequests).
+    static async obtenerGrillaVacaciones(req, res) {
+        try {
+            // --- Validar filtros (400 si inválidos) ---
+            const asOf = req.query.as_of;
+            if (asOf !== undefined && !esFechaCalendarioValida(asOf)) {
+                return res.status(400).json({ success: false, message: 'as_of debe ser una fecha válida YYYY-MM-DD' });
+            }
+            const asOfCanon = canonicalDate(asOf != null ? asOf : new Date());
+
+            // year para contar períodos del año (default = año de as_of).
+            let year;
+            if (req.query.year !== undefined) {
+                year = Number(req.query.year);
+                if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+                    return res.status(400).json({ success: false, message: 'year debe ser un entero entre 2000 y 2100' });
+                }
+            } else {
+                year = Number(asOfCanon.slice(0, 4));
+            }
+
+            let departmentId = null;
+            if (req.query.department_id !== undefined) {
+                departmentId = Number(req.query.department_id);
+                if (!Number.isInteger(departmentId) || departmentId < 1) {
+                    return res.status(400).json({ success: false, message: 'department_id inválido' });
+                }
+            }
+            let employeeFilterId = null;
+            if (req.query.employee_id !== undefined) {
+                employeeFilterId = Number(req.query.employee_id);
+                if (!Number.isInteger(employeeFilterId) || employeeFilterId < 1) {
+                    return res.status(400).json({ success: false, message: 'employee_id inválido' });
+                }
+            }
+            // include_terminated: boolean por query string ('true' literal).
+            const includeTerminated = req.query.include_terminated === 'true' || req.query.include_terminated === true;
+
+            // --- Scope: qué empleados puede ver el caller (own/team/all) ---
+            const visibleIds = await getVisibleEmployeeIds(req.user.id);
+
+            const conditions = [];
+            const params = [];
+            // terminated EXCLUIDO por default (D-05); opt-in con include_terminated.
+            if (!includeTerminated) {
+                conditions.push("e.status <> 'terminated'");
+            }
+            if (visibleIds !== null) {
+                // Scope acotado: NO es 403, simplemente menos filas. Si no ve a nadie → vacío.
+                if (visibleIds.length === 0) {
+                    return res.json({ success: true, data: { as_of: asOfCanon, year, rows: [], total: 0 } });
+                }
+                conditions.push(`e.id IN (${visibleIds.map(() => '?').join(',')})`);
+                params.push(...visibleIds);
+            }
+            if (departmentId !== null) {
+                conditions.push('e.department_id = ?');
+                params.push(departmentId);
+            }
+            if (employeeFilterId !== null) {
+                conditions.push('e.id = ?');
+                params.push(employeeFilterId);
+            }
+            const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+            // Orden de la grilla: departamento, luego nombre (como el Excel).
+            const employees = await db.query(`
+                SELECT e.id, e.full_name, e.hire_date, e.department_id,
+                       d.name AS department_name
+                FROM hr_employees e
+                LEFT JOIN departments d ON d.id = e.department_id
+                ${where}
+                ORDER BY d.name, e.full_name
+            `, params);
+
+            // Una llamada a computeVacationBalance por fila (N pequeño, aceptable).
+            const rows = [];
+            for (const e of employees) {
+                const saldo = await computeVacationBalance(db, e.id, asOfCanon);
+                const periodsInYear = await HrController._countVacationPeriodsInYear(e.id, year);
+                rows.push({
+                    employee_id: e.id,
+                    full_name: e.full_name,
+                    department_name: e.department_name != null ? e.department_name : null,
+                    hire_date: e.hire_date != null ? canonicalDate(e.hire_date) : null,
+                    years_of_service: saldo.years_of_service,
+                    days_accrued: saldo.days_accrued,
+                    days_taken: saldo.days_taken,
+                    days_available: saldo.days_available,
+                    days_expired: saldo.days_expired,
+                    days_expiring_soon: saldo.days_expiring_soon,
+                    periods_in_year: periodsInYear
+                });
+            }
+
+            return res.json({
+                success: true,
+                data: { as_of: asOfCanon, year, rows, total: rows.length }
+            });
+        } catch (err) {
+            console.error('obtenerGrillaVacaciones:', err);
+            res.status(500).json({ success: false, message: 'Error al obtener la grilla de vacaciones' });
+        }
+    }
+
+    // Cuenta las solicitudes 'vacaciones' de un empleado con date_from en el año dado
+    // (periods_in_year de la grilla). Cuenta TODAS las solicitudes (cualquier estado):
+    // es un conteo de "períodos" del año, no de saldo. Rango de fechas (no strftime)
+    // para no divergir entre SQLite y Postgres.
+    static async _countVacationPeriodsInYear(employeeId, year) {
+        const row = await db.queryOne(`
+            SELECT COUNT(*) AS c
+            FROM time_off_requests
+            WHERE employee_id = ?
+              AND request_type = 'vacaciones'
+              AND date_from >= ? AND date_from <= ?
+        `, [employeeId, `${year}-01-01`, `${year}-12-31`]);
+        return Number(row.c || 0);
+    }
 }
+
+// Exponemos la función pura computeVacationBalance como propiedad estática del
+// controller (NO cambiamos module.exports = HrController, así las rutas siguen
+// recibiendo la clase intacta). Esto permite testearla aislada en el smoke
+// (require('./hr.controller').computeVacationBalance) sin levantar el server.
+HrController.computeVacationBalance = computeVacationBalance;
 
 module.exports = HrController;

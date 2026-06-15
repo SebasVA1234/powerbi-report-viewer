@@ -83,6 +83,7 @@ const hrAdmin = (function () {
                 if (tab === 'employees') loadEmployees();
                 if (tab === 'holidays') loadHolidays();
                 if (tab === 'time-off') loadTimeOff();
+                if (tab === 'vacaciones') loadVacationGrid();
                 if (tab === 'memos') loadMemos();
             });
         });
@@ -123,17 +124,38 @@ const hrAdmin = (function () {
                     </div>
                 </div>
             `;
-            // Saldo del banco compensado
+            // Saldo del banco compensado + saldo de vacaciones (F3).
             try {
                 const b = await api('GET', `/api/hr/employees/${e.id}/compensated-balance`);
                 const d = b.data;
-                balBox.innerHTML = `
+                let html = `
                     <p>
+                        <strong>Banco de días compensados</strong> —
                         Acumulados: <strong>${d.days_accrued}</strong> ·
                         Usados: <strong>${d.days_used}</strong> ·
                         Disponibles: <strong style="color:${d.balance > 0 ? '#10b981' : '#999'}">${d.balance}</strong>
                     </p>
                 `;
+                // F3: saldo de vacaciones (derivado de la fecha de ingreso). Best-effort:
+                // si falla no rompe el resto del perfil.
+                try {
+                    const v = (await api('GET', `/api/hr/employees/${e.id}/vacation-balance`)).data;
+                    const dispCls = v.days_available < 0 ? 'vac-available-neg' : 'vac-available-ok';
+                    html += `
+                        <p>
+                            <strong>Vacaciones</strong> —
+                            Ganadas: <strong>${v.days_accrued}</strong> ·
+                            Tomadas: <strong>${v.days_taken}</strong> ·
+                            Caducadas: <strong>${v.days_expired}</strong> ·
+                            Disponibles: <strong class="${dispCls}">${v.days_available}</strong>
+                            ${v.days_expiring_soon > 0 ? `
+                                <span class="vac-badge-warn" title="Días que se pierden si no se toman antes de la fecha de caducidad (Art. 75: máximo 3 años de acumulación)">
+                                    ⚠ ${v.days_expiring_soon} caducan pronto${v.next_expiry ? ` (${escapeHtml(fmtDate(v.next_expiry.expiry_date))})` : ''}
+                                </span>` : ''}
+                        </p>
+                    `;
+                } catch { /* sin saldo de vacaciones no se bloquea el perfil */ }
+                balBox.innerHTML = html;
             } catch {
                 balBox.innerHTML = '<p class="empty-inline">No se pudo calcular el saldo.</p>';
             }
@@ -632,9 +654,22 @@ const hrAdmin = (function () {
                 { name: 'reason', label: 'Motivo', type: 'textarea', placeholder: 'Opcional' }
             );
 
+            // F3: mostrar el saldo de vacaciones del solicitante en el diálogo
+            // (best-effort; el backend re-valida con autoridad al crear).
+            let saldoHint = '';
+            if (myEmployee) {
+                try {
+                    const v = (await api('GET', `/api/hr/employees/${myEmployee.id}/vacation-balance`)).data;
+                    saldoHint = ` Tu saldo de vacaciones disponible: ${v.days_available} día(s).`;
+                    if (v.days_expiring_soon > 0) {
+                        saldoHint += ` ⚠ ${v.days_expiring_soon} caducan pronto${v.next_expiry ? ` (${fmtDate(v.next_expiry.expiry_date)})` : ''} — usalos antes.`;
+                    }
+                } catch { /* sin hint no se bloquea el alta */ }
+            }
+
             const data = await formDialog({
                 title: 'Nueva solicitud · Paso 1 de 2: datos',
-                description: 'Tras completar los datos, en el siguiente paso firmarás electrónicamente la solicitud.',
+                description: 'Tras completar los datos, en el siguiente paso firmarás electrónicamente la solicitud.' + saldoHint,
                 fields,
                 confirmText: 'Continuar a la firma'
             });
@@ -644,6 +679,16 @@ const hrAdmin = (function () {
             const days = Number(data.days_count);
             if (!days || days <= 0) { Notification.error('Indicá una cantidad de días válida (mayor a 0).'); return; }
             if (data.date_from > data.date_to) { Notification.error('La fecha "Desde" no puede ser posterior a "Hasta".'); return; }
+            // F3: para vacaciones los días son CALENDARIO (date_to − date_from + 1).
+            // Mismo recomputo que el guard 400 del backend, pero fallando acá más claro.
+            if (data.request_type === 'vacaciones') {
+                const MS_DIA = 24 * 60 * 60 * 1000;
+                const calDias = Math.round((Date.parse(data.date_to) - Date.parse(data.date_from)) / MS_DIA) + 1;
+                if (days !== calDias) {
+                    Notification.error(`En vacaciones los días se cuentan por calendario: del ${data.date_from} al ${data.date_to} son ${calDias} día(s), no ${days}. Corregí "Días totales".`);
+                    return;
+                }
+            }
 
             // Resolver el empleado objetivo y su nombre, para validar la firma.
             const targetEmployeeId = data.employee_id ? Number(data.employee_id) : null;
@@ -1342,10 +1387,123 @@ const hrAdmin = (function () {
         }
     }
 
+    // ------------------------------------------------------------
+    // Tab: Vacaciones (F3) — grilla anual estilo VACACIONES.xlsx
+    // ------------------------------------------------------------
+    // El backend recorta filas por visibilidad (own/team/all): un empleado ve
+    // SOLO su fila; el jefe su equipo; RRHH/admin todos. El saldo es 100%
+    // derivado (hire_date + solicitudes) — acá sólo se pinta.
+    // Mapa id→nombre poblado al cargar la grilla: evita pasar el nombre por el
+    // onclick inline (un apóstrofo en "O'Brien" rompería el handler).
+    let _vacNames = {};
+    async function loadVacationGrid() {
+        const tbody = document.getElementById('hr-vac-grid-tbody');
+        const yearSel = document.getElementById('hr-vac-year');
+        const inclTerm = document.getElementById('hr-vac-incl-term');
+
+        // Poblar el selector de año una sola vez: actual ± 2 (suficiente para
+        // consultar períodos pasados; el saldo siempre es "a hoy").
+        if (yearSel && yearSel.options.length === 0) {
+            const hoy = new Date().getFullYear();
+            for (let y = hoy + 1; y >= hoy - 3; y--) {
+                const opt = document.createElement('option');
+                opt.value = String(y); opt.textContent = String(y);
+                if (y === hoy) opt.selected = true;
+                yearSel.appendChild(opt);
+            }
+        }
+
+        tbody.innerHTML = '<tr><td colspan="10" class="loading">Calculando saldos...</td></tr>';
+        try {
+            const params = new URLSearchParams();
+            if (yearSel && yearSel.value) params.set('year', yearSel.value);
+            if (inclTerm && inclTerm.checked) params.set('include_terminated', 'true');
+            const r = await api('GET', `/api/hr/vacation-grid?${params.toString()}`);
+            const rows = r.data.rows || [];
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="empty">Sin empleados visibles (o sin perfil de empleado asociado a tu usuario).</td></tr>';
+                return;
+            }
+            _vacNames = {};
+            tbody.innerHTML = rows.map(row => {
+                _vacNames[row.employee_id] = row.full_name;
+                const dispCls = row.days_available < 0 ? 'vac-available-neg' : 'vac-available-ok';
+                const warn = row.days_expiring_soon > 0
+                    ? `<span class="vac-badge-warn" title="Días que caducan en los próximos 90 días si no se toman (Art. 75)">⚠ ${row.days_expiring_soon}</span>`
+                    : '';
+                return `
+                    <tr>
+                        <td>${escapeHtml(row.full_name)}</td>
+                        <td>${escapeHtml(row.department_name || '-')}</td>
+                        <td>${escapeHtml(fmtDate(row.hire_date) || '-')}</td>
+                        <td>${row.years_of_service}</td>
+                        <td>${row.days_accrued}</td>
+                        <td>${row.days_taken}</td>
+                        <td>${row.days_expired || 0}</td>
+                        <td><span class="${dispCls}">${row.days_available}</span> ${warn}</td>
+                        <td>${row.periods_in_year}</td>
+                        <td>
+                            <button class="btn-edit" onclick="hrAdmin.openVacationPeriods(${row.employee_id})">Períodos</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="10" class="error">${escapeHtml(err.message || 'Error al calcular la grilla')}</td></tr>`;
+        }
+    }
+
+    // Detalle de períodos de UN empleado (la "fila desplegada" del Excel):
+    // memo derivado, fechas, días, estado y si descontó saldo ("Tomada").
+    async function openVacationPeriods(employeeId) {
+        // El nombre sale del mapa poblado por la grilla (nunca del onclick: así
+        // un apóstrofo en el nombre no puede romper el handler ni inyectar).
+        const name = _vacNames[employeeId] || 'Empleado';
+        try {
+            const yearSel = document.getElementById('hr-vac-year');
+            const year = yearSel && yearSel.value ? `?year=${yearSel.value}` : '';
+            const r = await api('GET', `/api/hr/employees/${employeeId}/vacation-periods${year}`);
+            const periods = r.data.periods || [];
+            const estadoLabel = {
+                pending_jefe: 'Pendiente del jefe', pending_tthh: 'Pendiente de RRHH',
+                approved: 'Aprobada', rejected: 'Rechazada', cancelled: 'Cancelada', pending: 'Pendiente (histórico)'
+            };
+            const body = periods.length === 0
+                ? '<p class="empty-inline">Sin períodos de vacaciones en el año seleccionado.</p>'
+                : `
+                    <div class="table-container" style="max-height:340px; overflow:auto;">
+                        <table class="data-table">
+                            <thead><tr><th>Memorándum</th><th>Desde</th><th>Hasta</th><th>Días</th><th>Estado</th><th>Tomada</th></tr></thead>
+                            <tbody>
+                                ${periods.map(p => `
+                                    <tr>
+                                        <td>${escapeHtml(p.memo_number)}</td>
+                                        <td>${escapeHtml(fmtDate(p.date_from) || '-')}</td>
+                                        <td>${escapeHtml(fmtDate(p.date_to) || '-')}</td>
+                                        <td>${p.days_count}</td>
+                                        <td>${escapeHtml(estadoLabel[p.status] || p.status)}</td>
+                                        <td>${p.taken ? '✓ Sí' : '—'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            await infoDialog({
+                title: `Períodos de vacaciones · ${name}`,
+                message: body,
+                html: true,
+                okText: 'Cerrar'
+            });
+        } catch (err) {
+            Notification.error(err.message || 'Error al cargar los períodos');
+        }
+    }
+
     return {
         loadMe,
         loadEmployees, openCreateEmployee, editEmployee, deleteEmployee, viewBalance,
         syncFromUsers,
+        loadVacationGrid, openVacationPeriods,
         loadHolidays, openCreateHoliday, deleteHoliday,
             openRegisterAttendance, viewAttendance,
         loadTimeOff, openCreateTimeOff,

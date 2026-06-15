@@ -66,6 +66,31 @@
             }
         }
 
+        /* F3 Vacaciones: colores por tema (mismo criterio que --pay-*). */
+        :root {
+            --vac-warn:     #fbbf24;                      /* ámbar sobre oscuro */
+            --vac-warn-bg:  rgba(251, 191, 36, 0.14);
+            --vac-danger:   #fca5a5;                      /* rojo pastel sobre oscuro */
+            --vac-ok:       var(--accent-light);
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --vac-warn:     #b45309;                  /* amber-700 sobre blanco */
+                --vac-warn-bg:  rgba(245, 158, 11, 0.15);
+                --vac-danger:   #b91c1c;
+                --vac-ok:       #047857;
+            }
+        }
+        .vac-badge-warn {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: var(--vac-warn-bg); color: var(--vac-warn);
+            border-radius: 999px; padding: 2px 8px;
+            font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+        }
+        .vac-available-ok  { color: var(--vac-ok); font-weight: 700; }
+        .vac-available-neg { color: var(--vac-danger); font-weight: 700; }
+        .vac-grid-table tbody tr:hover td { background: var(--bg-hover); }
+
         /* Cabeceras de grupo (INGRESOS / EGRESOS / LÍQUIDO / EMPRESA). */
         .payroll-group {
             text-align: center !important; text-transform: uppercase;
@@ -476,6 +501,20 @@
                                     </svg>
                                     Solicitudes
                                 </button>
+                                <button class="tab-btn" data-hr-tab="vacaciones">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                        <circle cx="12" cy="12" r="4"></circle>
+                                        <line x1="12" y1="2" x2="12" y2="5"></line>
+                                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                                        <line x1="4.2" y1="4.2" x2="6.3" y2="6.3"></line>
+                                        <line x1="17.7" y1="17.7" x2="19.8" y2="19.8"></line>
+                                        <line x1="2" y1="12" x2="5" y2="12"></line>
+                                        <line x1="19" y1="12" x2="22" y2="12"></line>
+                                        <line x1="4.2" y1="19.8" x2="6.3" y2="17.7"></line>
+                                        <line x1="17.7" y1="6.3" x2="19.8" y2="4.2"></line>
+                                    </svg>
+                                    Vacaciones
+                                </button>
                                 <button class="tab-btn" data-hr-tab="memos">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
                                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -633,6 +672,50 @@
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                            <!-- Tab: Vacaciones (F3) — grilla anual estilo VACACIONES.xlsx.
+                                 El saldo es 100% calculado (hire_date + solicitudes); el
+                                 backend recorta filas por visibilidad own/team/all, así que
+                                 un empleado ve SOLO su fila y RRHH/admin ven todas. -->
+                            <div id="hr-vacaciones-tab" class="tab-content">
+                                <div class="tab-header">
+                                    <h3>Vacaciones · saldo y períodos</h3>
+                                    <button class="btn btn-secondary" onclick="hrAdmin.loadVacationGrid()">Actualizar</button>
+                                </div>
+                                <div class="rbac-filter-row">
+                                    <label>Año períodos:</label>
+                                    <select id="hr-vac-year" onchange="hrAdmin.loadVacationGrid()"></select>
+                                    <label class="vac-incl-term" style="display:inline-flex; align-items:center; gap:0.4rem; margin-left:1rem; cursor:pointer;">
+                                        <input type="checkbox" id="hr-vac-incl-term" onchange="hrAdmin.loadVacationGrid()">
+                                        Incluir dados de baja
+                                    </label>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table vac-grid-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Empleado</th>
+                                                <th>Departamento</th>
+                                                <th>Ingreso</th>
+                                                <th>Años</th>
+                                                <th>Ganados</th>
+                                                <th>Tomados</th>
+                                                <th>Caducados</th>
+                                                <th>Disponibles</th>
+                                                <th>Per./año</th>
+                                                <th>Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="hr-vac-grid-tbody">
+                                            <tr><td colspan="10" class="loading">Cargando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p class="empty-inline" style="margin-top:0.5rem;">
+                                    Saldo automático: 15 días/año + 1 extra por año después del 5.º (tope 30).
+                                    Lo no gozado de hace más de 3 años caduca (Art. 75) — el badge ⚠ avisa
+                                    cuando hay días por caducar en los próximos 90 días.
+                                </p>
                             </div>
                             <!-- Tab: Nómina / Roles de Pago (v1.2) -->
                             <div id="hr-payroll-tab" class="tab-content">
