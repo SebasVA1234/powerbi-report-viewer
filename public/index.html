@@ -582,7 +582,7 @@
                                 </div>
                                 <div class="rbac-filter-row">
                                     <label>Año:</label>
-                                    <select id="hr-holidays-year" onchange="hrAdmin.loadHolidays()">
+                                    <select id="hr-holidays-year" onchange="hrAdmin.loadHolidays(); hrAdmin.loadHolidayCalendar()">
                                         <option value="2026" selected>2026</option>
                                         <option value="2025">2025</option>
                                         <option value="2027">2027</option>
@@ -600,6 +600,29 @@
                                         </thead>
                                         <tbody id="hr-holidays-tbody">
                                             <tr><td colspan="4" class="loading">Cargando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- F4: Calendario anual tipo FERIADOS.xlsx (feriados × empleados).
+                                     Cada quien ve según su rol: empleado su fila, jefe su equipo,
+                                     RRHH/admin todos. Una celda = días de crédito al banco. -->
+                                <div class="tab-header" style="margin-top:2rem;">
+                                    <h3>Calendario anual — quién trabajó cada feriado</h3>
+                                    <button class="btn btn-secondary" onclick="hrAdmin.loadHolidayCalendar()">Actualizar</button>
+                                </div>
+                                <div class="rbac-filter-row">
+                                    <label style="display:inline-flex; align-items:center; gap:0.4rem; cursor:pointer;">
+                                        <input type="checkbox" id="hr-holcal-incl-term" onchange="hrAdmin.loadHolidayCalendar()">
+                                        Incluir dados de baja
+                                    </label>
+                                    <span class="empty-inline" style="margin-left:1rem;">Usa el año del selector de arriba. Cada celda = días de crédito al banco por trabajar ese feriado.</span>
+                                </div>
+                                <div class="table-container" style="overflow-x:auto;">
+                                    <table class="data-table vac-grid-table">
+                                        <thead id="hr-holcal-thead"></thead>
+                                        <tbody id="hr-holcal-tbody">
+                                            <tr><td class="loading">Cargando calendario...</td></tr>
                                         </tbody>
                                     </table>
                                 </div>

@@ -75,7 +75,12 @@ async function computeCompensatedBalance(conn, employeeId) {
     );
     const accrued = Number(creditRow.total || 0);
     const used = Number(usedRow.total || 0);
-    return { accrued, used, balance: accrued - used };
+    // Redondeo al centavo: los días admiten fracciones (media jornada = 0.5), y
+    // la resta en binario puede dar basura (0.1 + 0.2 → 0.300000000004). round2
+    // mantiene el saldo limpio en las 3 superficies que lo muestran (calendario
+    // F4, /compensated-balance, mensaje de saldo insuficiente).
+    const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+    return { accrued: round2(accrued), used: round2(used), balance: round2(accrued - used) };
 }
 
 // ============================================================
@@ -2225,6 +2230,131 @@ class HrController {
               AND date_from >= ? AND date_from <= ?
         `, [employeeId, `${year}-01-01`, `${year}-12-31`]);
         return Number(row.c || 0);
+    }
+
+    // GET /api/hr/holiday-calendar?year=&department_id=&include_terminated=
+    // F4 — Vista calendario tipo FERIADOS.xlsx: feriados del año (columnas) ×
+    // empleados visibles (filas), con el crédito que cada uno ganó por trabajar
+    // cada feriado, el total del año y su banco compensado. 100% LECTURA; reusa
+    // holidays + holiday_attendance + computeCompensatedBalance. Visibilidad
+    // own/team/all (recorta filas, NO 403) — mismo patrón que obtenerGrillaVacaciones.
+    static async obtenerCalendarioFeriados(req, res) {
+        try {
+            // year: default = año actual.
+            let year;
+            if (req.query.year !== undefined) {
+                year = Number(req.query.year);
+                if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+                    return res.status(400).json({ success: false, message: 'year debe ser un entero entre 2000 y 2100' });
+                }
+            } else {
+                year = new Date().getFullYear();
+            }
+
+            let departmentId = null;
+            if (req.query.department_id !== undefined) {
+                departmentId = Number(req.query.department_id);
+                if (!Number.isInteger(departmentId) || departmentId < 1) {
+                    return res.status(400).json({ success: false, message: 'department_id inválido' });
+                }
+            }
+            const includeTerminated = req.query.include_terminated === 'true' || req.query.include_terminated === true;
+
+            // Feriados activos del año = columnas de la grilla (rango de fechas, no
+            // strftime/EXTRACT, para no divergir entre SQLite y Postgres).
+            const holidays = await db.query(`
+                SELECT id, holiday_date, name, is_national
+                FROM holidays
+                WHERE is_active = 1 AND holiday_date >= ? AND holiday_date <= ?
+                ORDER BY holiday_date
+            `, [`${year}-01-01`, `${year}-12-31`]);
+            const holidaysOut = holidays.map(h => ({
+                id: h.id,
+                holiday_date: canonicalDate(h.holiday_date),
+                name: h.name,
+                is_national: !!h.is_national
+            }));
+
+            // Scope: empleados visibles (own/team/all). null = ve todos (admin/read.all).
+            const visibleIds = await getVisibleEmployeeIds(req.user.id);
+            const conditions = [];
+            const params = [];
+            if (!includeTerminated) conditions.push("e.status <> 'terminated'");
+            if (visibleIds !== null) {
+                if (visibleIds.length === 0) {
+                    return res.json({ success: true, data: { year, holidays: holidaysOut, rows: [], total: 0 } });
+                }
+                conditions.push(`e.id IN (${visibleIds.map(() => '?').join(',')})`);
+                params.push(...visibleIds);
+            }
+            if (departmentId !== null) {
+                conditions.push('e.department_id = ?');
+                params.push(departmentId);
+            }
+            const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+            const employees = await db.query(`
+                SELECT e.id, e.full_name, e.department_id, d.name AS department_name
+                FROM hr_employees e
+                LEFT JOIN departments d ON d.id = e.department_id
+                ${where}
+                ORDER BY d.name, e.full_name
+            `, params);
+
+            if (employees.length === 0) {
+                return res.json({ success: true, data: { year, holidays: holidaysOut, rows: [], total: 0 } });
+            }
+
+            // Asistencias de TODOS los empleados visibles a los feriados del año en
+            // UNA sola query (evita N×M). Mapa employee_id → { holiday_id: {...} }.
+            const empIds = employees.map(e => e.id);
+            const holidayIds = holidaysOut.map(h => h.id);
+            const attByEmp = {};
+            if (holidayIds.length > 0) {
+                const empPh = empIds.map(() => '?').join(',');
+                const holPh = holidayIds.map(() => '?').join(',');
+                const att = await db.query(`
+                    SELECT employee_id, holiday_id, days_credit, schedule_text
+                    FROM holiday_attendance
+                    WHERE employee_id IN (${empPh}) AND holiday_id IN (${holPh})
+                `, [...empIds, ...holidayIds]);
+                for (const a of att) {
+                    if (!attByEmp[a.employee_id]) attByEmp[a.employee_id] = {};
+                    // days_credit es REAL/NUMERIC → Number() (PG lo devuelve como string).
+                    attByEmp[a.employee_id][a.holiday_id] = {
+                        days_credit: Number(a.days_credit) || 0,
+                        schedule_text: a.schedule_text || null
+                    };
+                }
+            }
+
+            // Filas: por empleado, sus asistencias + crédito del año + banco total.
+            const rows = [];
+            for (const e of employees) {
+                const att = attByEmp[e.id] || {};
+                let creditInYear = 0;
+                for (const hid of holidayIds) {
+                    if (att[hid]) creditInYear += att[hid].days_credit;
+                }
+                const { balance } = await computeCompensatedBalance(db, e.id);
+                rows.push({
+                    employee_id: e.id,
+                    full_name: e.full_name,
+                    department_name: e.department_name != null ? e.department_name : null,
+                    attendances: att,                                  // { holiday_id: { days_credit, schedule_text } }
+                    credit_in_year: Math.round(creditInYear * 100) / 100,
+                    bank_balance: balance                              // banco compensado disponible (histórico completo)
+                });
+            }
+
+            return res.json({
+                success: true,
+                data: { year, holidays: holidaysOut, rows, total: rows.length }
+            });
+        } catch (err) {
+            console.error('obtenerCalendarioFeriados:', err);
+            res.status(500).json({ success: false, message: 'Error al obtener el calendario de feriados' });
+        }
     }
 }
 

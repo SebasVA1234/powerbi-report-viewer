@@ -86,6 +86,8 @@ router.get('/employees/:id/compensated-balance', authMiddleware, HrController.ge
 router.get('/employees/:id/vacation-balance', authMiddleware, HrController.obtenerSaldoVacaciones);
 router.get('/employees/:id/vacation-periods', authMiddleware, HrController.listarPeriodosVacaciones);
 router.get('/vacation-grid',                  authMiddleware, HrController.obtenerGrillaVacaciones);
+// F4: calendario anual de feriados (grilla feriados × empleados) — lectura, scope own/team/all in-controller.
+router.get('/holiday-calendar',               authMiddleware, HrController.obtenerCalendarioFeriados);
 
 // PR-3c + F1: Solicitudes de tiempo libre con firma + aprobación multinivel + adjuntos.
 //   - listar: cualquier user logueado (la visibilidad la filtra el controller).

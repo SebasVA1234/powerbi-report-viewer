@@ -81,7 +81,7 @@ const hrAdmin = (function () {
                 document.getElementById(`hr-${tab}-tab`).classList.add('active');
                 if (tab === 'me') loadMe();
                 if (tab === 'employees') loadEmployees();
-                if (tab === 'holidays') loadHolidays();
+                if (tab === 'holidays') { loadHolidays(); loadHolidayCalendar(); }
                 if (tab === 'time-off') loadTimeOff();
                 if (tab === 'vacaciones') loadVacationGrid();
                 if (tab === 'memos') loadMemos();
@@ -499,6 +499,59 @@ const hrAdmin = (function () {
             });
         } catch (err) {
             Notification.error('Error: ' + err.message);
+        }
+    }
+
+    // F4: grilla calendario anual (feriados × empleados) estilo FERIADOS.xlsx.
+    // Comparte el año con el selector de feriados de arriba. El backend recorta
+    // las filas por visibilidad (empleado=su fila, jefe=su equipo, RRHH/admin=todos);
+    // cada celda es los días de crédito que esa persona ganó por trabajar ese feriado.
+    async function loadHolidayCalendar() {
+        const thead = document.getElementById('hr-holcal-thead');
+        const tbody = document.getElementById('hr-holcal-tbody');
+        if (!thead || !tbody) return;
+        const yearSel = document.getElementById('hr-holidays-year');
+        const inclTerm = document.getElementById('hr-holcal-incl-term');
+        const year = yearSel && yearSel.value ? yearSel.value : String(new Date().getFullYear());
+        tbody.innerHTML = '<tr><td class="loading">Cargando calendario...</td></tr>';
+        try {
+            const params = new URLSearchParams();
+            params.set('year', year);
+            if (inclTerm && inclTerm.checked) params.set('include_terminated', 'true');
+            const r = await api('GET', `/api/hr/holiday-calendar?${params.toString()}`);
+            const holidays = r.data.holidays || [];
+            const rows = r.data.rows || [];
+
+            // Header: Empleado | Depto | <cada feriado: MM-DD> | Total año | Banco.
+            thead.innerHTML = `<tr>
+                <th>Empleado</th>
+                <th>Departamento</th>
+                ${holidays.map(h => `<th style="text-align:center; white-space:nowrap;" title="${escapeHtml(h.name)} (${escapeHtml(fmtDate(h.holiday_date))})">${escapeHtml((h.holiday_date || '').slice(5))}</th>`).join('')}
+                <th style="text-align:center;">Total año</th>
+                <th style="text-align:center;">Banco</th>
+            </tr>`;
+
+            if (rows.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${holidays.length + 4}" class="empty">Sin empleados visibles para este año.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = rows.map(row => `
+                <tr>
+                    <td>${escapeHtml(row.full_name)}</td>
+                    <td>${escapeHtml(row.department_name || '-')}</td>
+                    ${holidays.map(h => {
+                        const a = row.attendances ? row.attendances[h.id] : null;
+                        if (!a) return '<td style="text-align:center; opacity:0.35;">·</td>';
+                        const tip = a.schedule_text ? ` title="${escapeHtml(a.schedule_text)}"` : '';
+                        return `<td style="text-align:center;"><span class="vac-available-ok"${tip}>${a.days_credit}</span></td>`;
+                    }).join('')}
+                    <td style="text-align:center;"><strong>${row.credit_in_year}</strong></td>
+                    <td style="text-align:center;"><strong class="${row.bank_balance > 0 ? 'vac-available-ok' : ''}">${row.bank_balance}</strong></td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="99" class="error">${escapeHtml(err.message || 'Error al cargar el calendario')}</td></tr>`;
         }
     }
 
@@ -1506,7 +1559,7 @@ const hrAdmin = (function () {
         syncFromUsers,
         loadVacationGrid, openVacationPeriods,
         loadHolidays, openCreateHoliday, deleteHoliday,
-            openRegisterAttendance, viewAttendance,
+            openRegisterAttendance, viewAttendance, loadHolidayCalendar,
         loadTimeOff, openCreateTimeOff,
             approveTimeOff, rejectTimeOff, cancelTimeOff,
             openTimeOffDetail, openDiscountDecision, uploadAttachmentFromDetail,
