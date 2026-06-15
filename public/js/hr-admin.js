@@ -1460,9 +1460,10 @@ const hrAdmin = (function () {
         // un apóstrofo en el nombre no puede romper el handler ni inyectar).
         const name = _vacNames[employeeId] || 'Empleado';
         try {
-            const yearSel = document.getElementById('hr-vac-year');
-            const year = yearSel && yearSel.value ? `?year=${yearSel.value}` : '';
-            const r = await api('GET', `/api/hr/employees/${employeeId}/vacation-periods${year}`);
+            // Mostramos TODO el historial de vacaciones del empleado (sin filtrar por
+            // el año de la grilla): el botón "Períodos" es el detalle completo de la
+            // persona. El filtro de año de la grilla sólo gobierna el conteo "Per./año".
+            const r = await api('GET', `/api/hr/employees/${employeeId}/vacation-periods`);
             const periods = r.data.periods || [];
             const estadoLabel = {
                 pending_jefe: 'Pendiente del jefe', pending_tthh: 'Pendiente de RRHH',
